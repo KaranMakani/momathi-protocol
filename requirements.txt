@@ -1,4 +1,4 @@
-paradex-py
+paradex-py==0.4.2
 python-telegram-bot
 pandas
 numpy
