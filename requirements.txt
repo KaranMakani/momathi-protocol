@@ -1,0 +1,5 @@
+paradex-py
+python-telegram-bot
+pandas
+numpy
+python-dotenv

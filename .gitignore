@@ -1,0 +1,12 @@
+# Momathi Protocol
+.env
+tomathi.log
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/
+dist/
+build/
+__pkgtmp/
+active_trades.json
