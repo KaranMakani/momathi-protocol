@@ -1,27 +1,23 @@
 """
-Momathi Bot — Strategy Engine
+Momathi Protocol — Strategy Engine
 Computes EMAs, detects trend, validates signals, and calculates trade levels.
 """
 import logging
+import time
+import requests
 import pandas as pd
 
 import config
 
 logger = logging.getLogger("momathi.strategy")
 
-# ── Paradex Public Client (for candle data) ─────────────────────
-from paradex_py import Paradex
-from paradex_py.environment import Environment
-import time
-
-_public_paradex = Paradex(
-    env="testnet" if config.PARADEX_ENV == "TESTNET" else "prod"
-)
+# ── Paradex Public API base URL ──────────────────────────────────
+_PARADEX_API_URL = "https://api.prod.paradex.trade/v1" if config.PARADEX_ENV == "PROD" else "https://api.testnet.paradex.trade/v1"
 
 
 def fetch_candles(coin: str = None, resolution: str = "5") -> pd.DataFrame:
     """
-    Fetch OHLCV candles for the given coin from Paradex.
+    Fetch OHLCV candles for the given coin from Paradex REST API.
     Args:
         coin: Trading pair (e.g. "BTC")
         resolution: Candle resolution ("5" = 5min, "15" = 15min, "60" = 1H)
@@ -39,32 +35,36 @@ def fetch_candles(coin: str = None, resolution: str = "5") -> pd.DataFrame:
     start_at = end_at - (config.CANDLE_LIMIT * res_minutes * 60 * 1000)
 
     try:
-        klines = _public_paradex.api_client.fetch_klines(
-            symbol=symbol,
-            resolution=resolution,
-            start_at=start_at,
-            end_at=end_at
+        resp = requests.get(
+            f"{_PARADEX_API_URL}/candles",
+            params={
+                "symbol": symbol,
+                "resolution": resolution,
+                "start_at": start_at,
+                "end_at": end_at,
+            },
+            timeout=10,
         )
-        
-        # Paradex returns `{"results": [[timestamp, open, high, low, close, volume], ...]}`
-        results = klines.get("results", []) if isinstance(klines, dict) else klines
-        
+        resp.raise_for_status()
+        data = resp.json()
+        results = data.get("results", [])
+
         df = pd.DataFrame(results, columns=["timestamp", "open", "high", "low", "close", "volume"])
         if df.empty:
-            logger.warning("Empty klines returned for %s", symbol)
+            logger.warning("Empty candles returned for %s", symbol)
             return pd.DataFrame(columns=["timestamp", "open", "high", "low", "close", "volume"])
-            
+
         # Convert values to float
         for col in ["open", "high", "low", "close", "volume"]:
             df[col] = df[col].astype(float)
-                
-        # Convert timestamp array
+
+        # Convert timestamp
         df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms")
-        
-        # Sort chronologically just in case
+
+        # Sort chronologically
         df = df.sort_values("timestamp").reset_index(drop=True)
         return df
-        
+
     except Exception as e:
         logger.error("Error fetching candles from Paradex: %s", e)
         raise
@@ -102,7 +102,9 @@ def get_mark_price(coin: str) -> float | None:
     """
     symbol = f"{coin}-USD-PERP"
     try:
-        bbo = _public_paradex.api_client.fetch_bbo(symbol=symbol)
+        resp = requests.get(f"{_PARADEX_API_URL}/bbo", params={"symbol": symbol}, timeout=10)
+        resp.raise_for_status()
+        bbo = resp.json()
         bid = float(bbo.get("bid") or 0)
         ask = float(bbo.get("ask") or 0)
         if bid > 0 and ask > 0:
