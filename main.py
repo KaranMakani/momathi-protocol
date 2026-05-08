@@ -1,5 +1,5 @@
 """
-Tomathi Bot — Main Entry Point
+Momathi Bot — Main Entry Point
 Starts the Paradex client, trade manager, and Telegram bot.
 Runs a background job to auto-update pending orders every minute.
 """
@@ -11,7 +11,7 @@ import time
 import config
 from paradex_client import ParadexClient
 from trade_manager import TradeManager
-from telegram_bot import TomathiTelegramBot
+from telegram_bot import MomathiTelegramBot
 
 # ── Logging setup ────────────────────────────────────────────────
 logging.basicConfig(
@@ -20,10 +20,10 @@ logging.basicConfig(
     datefmt="%Y-%m-%d %H:%M:%S",
     handlers=[
         logging.StreamHandler(sys.stdout),
-        logging.FileHandler("tomathi.log"),
+        logging.FileHandler("momathi.log"),
     ],
 )
-logger = logging.getLogger("tomathi.main")
+logger = logging.getLogger("momathi.main")
 
 # ── Update interval (seconds) ───────────────────────────────────
 ORDER_UPDATE_INTERVAL = 60  # check every 1 minute
@@ -46,7 +46,7 @@ def validate_config():
         sys.exit(1)
 
 
-async def fill_check_loop(trade_mgr: TradeManager, tg_bot: TomathiTelegramBot):
+async def fill_check_loop(trade_mgr: TradeManager, tg_bot: MomathiTelegramBot):
     """Background loop: detect filled entries + manage pyramid every 60s."""
     logger.info("Fill check loop started (60s interval)")
 
@@ -106,7 +106,7 @@ async def fill_check_loop(trade_mgr: TradeManager, tg_bot: TomathiTelegramBot):
             logger.error("Fill/pyramid check error: %s", e, exc_info=True)
 
 
-async def order_update_loop(trade_mgr: TradeManager, tg_bot: TomathiTelegramBot):
+async def order_update_loop(trade_mgr: TradeManager, tg_bot: MomathiTelegramBot):
     """Background loop: update pending orders + trail SL aligned to each trade's candle close.
 
     Calculates the next relevant candle boundary across all active trades
@@ -190,7 +190,7 @@ async def order_update_loop(trade_mgr: TradeManager, tg_bot: TomathiTelegramBot)
 
 async def post_init(app):
     """Called after the Telegram app is initialized — set bot commands & start bg task."""
-    tg_bot = app.bot_data.get("tomathi_bot")
+    tg_bot = app.bot_data.get("momathi_bot")
     trade_mgr = app.bot_data.get("trade_mgr")
 
     if tg_bot:
@@ -206,7 +206,7 @@ async def post_init(app):
         await app.bot.send_message(
             chat_id=chat_id,
             text=(
-                        "🍅 <b>Tomathi Bot Started!</b>\n\n"
+                        "🍅 <b>Momathi Bot Started!</b>\n\n"
                 f"💰 Risk: <b>${config.runtime['risk_usd']:.2f}</b>\n"
                 f"📊 Strategy: EMA 8/30 (5m or 15m)\n"
                 f"🔺 Pyramid: {'ON' if config.PYRAMID_ENABLED else 'OFF'} "
@@ -244,20 +244,20 @@ def main():
     trade_mgr = TradeManager(paradex_client)
 
     logger.info("Building Telegram bot...")
-    tg_bot = TomathiTelegramBot(trade_mgr)
+    tg_bot = MomathiTelegramBot(trade_mgr)
     app = tg_bot.build()
 
     # Store references for post_init
-    app.bot_data["tomathi_bot"] = tg_bot
+    app.bot_data["momathi_bot"] = tg_bot
     app.bot_data["trade_mgr"] = trade_mgr
 
     # Register post-init callback
     app.post_init = post_init
 
-    logger.info("Starting Tomathi bot — polling Telegram...")
+    logger.info("Starting Momathi bot — polling Telegram...")
     app.run_polling(drop_pending_updates=True)
 
-    logger.info("Tomathi bot stopped.")
+    logger.info("Momathi bot stopped.")
 
 
 if __name__ == "__main__":

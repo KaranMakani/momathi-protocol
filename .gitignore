@@ -1,6 +1,6 @@
 # Momathi Protocol
 .env
-tomathi.log
+momathi.log
 __pycache__/
 *.pyc
 .venv/

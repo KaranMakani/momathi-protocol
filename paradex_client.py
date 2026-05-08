@@ -1,5 +1,5 @@
 """
-Tomathi Bot — Paradex Exchange Client
+Momathi Bot — Paradex Exchange Client
 Thin wrapper around the paradex-py SDK for order management.
 """
 import logging
@@ -12,7 +12,7 @@ from paradex_py.common.order import Order, OrderType, OrderSide
 
 import config
 
-logger = logging.getLogger("tomathi.paradex_client")
+logger = logging.getLogger("momathi.paradex_client")
 
 
 class ParadexClient:
@@ -24,7 +24,7 @@ class ParadexClient:
             env="testnet" if config.PARADEX_ENV == "TESTNET" else "prod",
             l1_address=config.PARADEX_L1_ADDRESS,
             l2_private_key=config.PARADEX_PRIVATE_KEY,
-            auto_auth=True
+            
         )
         logger.info("ParadexClient initialized for L1 Address %s on %s", config.PARADEX_L1_ADDRESS, env)
 

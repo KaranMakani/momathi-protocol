@@ -1,5 +1,5 @@
 """
-Tomathi Bot — Telegram Bot
+Momathi Bot — Telegram Bot
 All Telegram commands and notification system.
 """
 import logging
@@ -21,7 +21,7 @@ import config
 from strategy import validate_signal
 from trade_manager import TradeManager
 
-logger = logging.getLogger("tomathi.telegram")
+logger = logging.getLogger("momathi.telegram")
 
 
 def auth(func):
@@ -44,8 +44,8 @@ def auth(func):
     return wrapper
 
 
-class TomathiTelegramBot:
-    """Telegram interface for Tomathi trading bot."""
+class MomathiTelegramBot:
+    """Telegram interface for Momathi trading bot."""
 
     def __init__(self, trade_manager: TradeManager):
         self.tm = trade_manager
@@ -126,7 +126,7 @@ class TomathiTelegramBot:
     @auth
     async def cmd_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         msg = (
-            "🍅 <b>Tomathi Trading Bot</b>\n\n"
+            "🍅 <b>Momathi Trading Bot</b>\n\n"
             "📋 <b>Trade Commands:</b>\n"
             "/<b>coin</b> <b>direction</b> <b>timeframe</b>\n"
             "Examples:\n"
@@ -346,7 +346,7 @@ class TomathiTelegramBot:
 
     @auth
     async def cmd_stop_bot(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        await update.message.reply_text("🛑 Shutting down Tomathi bot... Goodbye! 🍅")
+        await update.message.reply_text("🛑 Shutting down Momathi bot... Goodbye! 🍅")
         config.runtime["running"] = False
         # Stop the application gracefully
         asyncio.get_event_loop().call_later(1, lambda: os.kill(os.getpid(), signal.SIGINT))

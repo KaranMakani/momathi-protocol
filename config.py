@@ -1,5 +1,5 @@
 """
-Tomathi Bot — Configuration
+Momathi Bot — Configuration
 Loads .env and provides mutable runtime settings.
 """
 import os

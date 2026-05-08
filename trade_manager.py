@@ -1,5 +1,5 @@
 """
-Tomathi Bot — Trade Manager
+Momathi Bot — Trade Manager
 Orchestrates trade execution, position sizing, and PnL tracking.
 """
 import json
@@ -11,7 +11,7 @@ import config
 from paradex_client import ParadexClient
 from strategy import validate_signal, get_ema30, get_mark_price
 
-logger = logging.getLogger("tomathi.trade_mgr")
+logger = logging.getLogger("momathi.trade_mgr")
 
 TRADES_FILE = "active_trades.json"
 

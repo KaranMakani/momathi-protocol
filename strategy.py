@@ -1,5 +1,5 @@
 """
-Tomathi Bot — Strategy Engine
+Momathi Bot — Strategy Engine
 Computes EMAs, detects trend, validates signals, and calculates trade levels.
 """
 import logging
@@ -7,7 +7,7 @@ import pandas as pd
 
 import config
 
-logger = logging.getLogger("tomathi.strategy")
+logger = logging.getLogger("momathi.strategy")
 
 # ── Paradex Public Client (for candle data) ─────────────────────
 from paradex_py import Paradex
