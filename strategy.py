@@ -68,7 +68,7 @@ def fetch_candles(coin: str = None, resolution: str = "5") -> pd.DataFrame:
 
     try:
         resp = requests.get(
-            f"{_PARADEX_API_URL}/candles",
+            f"{_PARADEX_API_URL}/klines",
             params={
                 "symbol": symbol,
                 "resolution": resolution,
