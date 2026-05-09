@@ -68,7 +68,7 @@ def fetch_candles(coin: str = None, resolution: str = "5") -> pd.DataFrame:
 
     try:
         resp = requests.get(
-            f"{_PARADEX_API_URL}/klines",
+            f"{_PARADEX_API_URL}/markets/klines",
             params={
                 "symbol": symbol,
                 "resolution": resolution,
@@ -129,33 +129,14 @@ def get_ema30(coin: str, exec_tf: str = "5") -> float | None:
 
 def get_mark_price(coin: str) -> float | None:
     """
-    Return the current approximate mid-price for a coin.
-    Tries the BBO (best-bid/offer) endpoint first; falls back to
-    the last 5m candle close if unavailable.
+    Return the current approximate price for a coin using latest 5m kline close.
     """
-    symbol = f"{coin}-USD-PERP"
-    try:
-        resp = requests.get(
-            f"{_PARADEX_API_URL}/bbo",
-            params={"symbol": symbol},
-            headers=_get_auth_headers(),
-            timeout=10,
-        )
-        resp.raise_for_status()
-        bbo = resp.json()
-        bid = float(bbo.get("bid") or 0)
-        ask = float(bbo.get("ask") or 0)
-        if bid > 0 and ask > 0:
-            return (bid + ask) / 2
-    except Exception:
-        pass  # fall through to candle fallback
-
     try:
         df = fetch_candles(coin, resolution="5")
         if not df.empty:
             return float(df.iloc[-1]["close"])
     except Exception as e:
-        logger.error("get_mark_price fallback failed for %s: %s", coin, e)
+        logger.warning("Failed to get mark price for %s: %s", coin, e)
     return None
 
 
