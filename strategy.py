@@ -32,12 +32,12 @@ def _get_auth_headers():
             px_client = _paradex_client.client
             if hasattr(px_client, 'account') and px_client.account:
                 headers = px_client.account.auth_headers()
-                logger.debug("Auth headers obtained: %s", bool(headers))
+                logger.info("Auth headers obtained: %s", bool(headers))
                 return headers
             else:
                 logger.warning("ParadexClient has no account initialized")
         except Exception as e:
-            logger.warning("Failed to get auth headers: %s", e)
+            logger.warning("Failed to get auth headers: %s", e, exc_info=True)
     else:
         logger.warning("ParadexClient not set or missing client attribute")
     return {}
