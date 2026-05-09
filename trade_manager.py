@@ -177,16 +177,22 @@ class TradeManager:
         sl = trade["sl"]
         tp = trade["tp"]
 
+        logger.info("Attempting to place TP/SL for %s %s | size=%.6f | SL=%.2f | TP=%.2f", coin, "LONG" if is_buy else "SHORT", size, sl, tp)
+
         # Place SL
+        logger.info("Placing SL for %s...", coin)
         sl_res = self.client.place_trigger_order(
             coin, is_buy=not is_buy, size=size, trigger_px=sl, tpsl="sl", reduce_only=True
         )
+        logger.info("SL result for %s: %s", coin, sl_res)
         trade["sl_oid"] = sl_res.get("oid")
 
         # Place TP
+        logger.info("Placing TP for %s...", coin)
         tp_res = self.client.place_trigger_order(
             coin, is_buy=not is_buy, size=size, trigger_px=tp, tpsl="tp", reduce_only=True
         )
+        logger.info("TP result for %s: %s", coin, tp_res)
         trade["tp_oid"] = tp_res.get("oid")
         
         logger.info("Placed TP/SL for %s: SL_OID=%s, TP_OID=%s", coin, trade["sl_oid"], trade["tp_oid"])
@@ -227,9 +233,11 @@ class TradeManager:
 
         # ── 1. Fill detection for pending entries ───────────────────────
         open_orders = self.client.get_open_orders()
+        logger.info("Fill check: %d open orders, %d active trades to check", len(open_orders), len(self.active_trades))
 
         for trade in self.active_trades[:]:
             if trade.get("filled"):
+                logger.info("Fill check: skipping %s %s (already marked filled)", trade["direction"], trade["coin"])
                 continue
 
             coin = trade["coin"]
@@ -247,14 +255,18 @@ class TradeManager:
                 needs_save = True
                 continue
 
+            logger.info("Fill check: %s %s | entry_oid=%s | checking if still open...", direction, coin, entry_oid)
             entry_still_open = any(
                 o.get("oid") == entry_oid for o in open_orders
             )
+            logger.info("Fill check: %s %s | entry_still_open=%s", direction, coin, entry_still_open)
 
             if not entry_still_open:
                 # Check if a position now exists (order was filled)
                 positions = self.client.get_positions()
+                logger.info("Fill check: %s %s | positions found: %s", direction, coin, [p["coin"] for p in positions])
                 has_position = any(p["coin"] == coin for p in positions)
+                logger.info("Fill check: %s %s | has_position=%s", direction, coin, has_position)
 
                 if has_position:
                     trade["filled"] = True
