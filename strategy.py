@@ -27,11 +27,18 @@ def set_paradex_client(client):
 def _get_auth_headers():
     """Get auth headers from the ParadexClient if available."""
     if _paradex_client and hasattr(_paradex_client, 'client'):
-        # paradex-py stores auth headers in the internal client
         try:
-            return _paradex_client.client.api_client.account.auth_headers()
-        except Exception:
-            pass
+            px_client = _paradex_client.client
+            if hasattr(px_client, 'account') and px_client.account:
+                headers = px_client.account.auth_headers()
+                logger.debug("Auth headers obtained: %s", bool(headers))
+                return headers
+            else:
+                logger.warning("ParadexClient has no account initialized")
+        except Exception as e:
+            logger.warning("Failed to get auth headers: %s", e)
+    else:
+        logger.warning("ParadexClient not set or missing client attribute")
     return {}
 
 
