@@ -26,18 +26,22 @@ def set_paradex_client(client):
 
 
 def _get_auth_headers():
-    """Get auth headers from the ParadexClient if available."""
+    """Get JWT Bearer token from the ParadexClient for authenticated API requests."""
     if _paradex_client and hasattr(_paradex_client, 'client'):
         try:
             px_client = _paradex_client.client
             if hasattr(px_client, 'account') and px_client.account:
-                headers = px_client.account.auth_headers()
-                logger.info("Auth headers obtained: %s", bool(headers))
-                return headers
+                # Get JWT token from account (set after onboarding/auth)
+                jwt_token = getattr(px_client.account, 'jwt_token', None)
+                if jwt_token:
+                    logger.info("JWT token available for API requests")
+                    return {"Authorization": f"Bearer {jwt_token}"}
+                else:
+                    logger.warning("No JWT token in account — need to call auth() first")
             else:
                 logger.warning("ParadexClient has no account initialized")
         except Exception as e:
-            logger.warning("Failed to get auth headers: %s", e, exc_info=True)
+            logger.warning("Failed to get JWT token: %s", e, exc_info=True)
     else:
         logger.warning("ParadexClient not set or missing client attribute")
     return {}
