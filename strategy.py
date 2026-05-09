@@ -12,7 +12,8 @@ import config
 logger = logging.getLogger("momathi.strategy")
 
 # ── Paradex API base URL (authenticated) ─────────────────────────
-_PARADEX_API_URL = "https://api.prod.paradex.trade/v1" if config.PARADEX_ENV == "PROD" else "https://api.testnet.paradex.trade/v1"
+_is_prod = config.PARADEX_ENV in ("PROD", "MAINNET")
+_PARADEX_API_URL = "https://api.prod.paradex.trade/v1" if _is_prod else "https://api.testnet.paradex.trade/v1"
 
 # Global reference to authenticated ParadexClient (set by main.py)
 _paradex_client = None
