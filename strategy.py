@@ -11,8 +11,28 @@ import config
 
 logger = logging.getLogger("momathi.strategy")
 
-# ── Paradex Public API base URL ──────────────────────────────────
+# ── Paradex API base URL (authenticated) ─────────────────────────
 _PARADEX_API_URL = "https://api.prod.paradex.trade/v1" if config.PARADEX_ENV == "PROD" else "https://api.testnet.paradex.trade/v1"
+
+# Global reference to authenticated ParadexClient (set by main.py)
+_paradex_client = None
+
+
+def set_paradex_client(client):
+    """Set the authenticated ParadexClient for candle/BBO fetching."""
+    global _paradex_client
+    _paradex_client = client
+
+
+def _get_auth_headers():
+    """Get auth headers from the ParadexClient if available."""
+    if _paradex_client and hasattr(_paradex_client, 'client'):
+        # paradex-py stores auth headers in the internal client
+        try:
+            return _paradex_client.client.api_client.account.auth_headers()
+        except Exception:
+            pass
+    return {}
 
 
 def fetch_candles(coin: str = None, resolution: str = "5") -> pd.DataFrame:
@@ -43,6 +63,7 @@ def fetch_candles(coin: str = None, resolution: str = "5") -> pd.DataFrame:
                 "start_at": start_at,
                 "end_at": end_at,
             },
+            headers=_get_auth_headers(),
             timeout=10,
         )
         resp.raise_for_status()
@@ -102,7 +123,12 @@ def get_mark_price(coin: str) -> float | None:
     """
     symbol = f"{coin}-USD-PERP"
     try:
-        resp = requests.get(f"{_PARADEX_API_URL}/bbo", params={"symbol": symbol}, timeout=10)
+        resp = requests.get(
+            f"{_PARADEX_API_URL}/bbo",
+            params={"symbol": symbol},
+            headers=_get_auth_headers(),
+            timeout=10,
+        )
         resp.raise_for_status()
         bbo = resp.json()
         bid = float(bbo.get("bid") or 0)

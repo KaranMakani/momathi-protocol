@@ -243,6 +243,10 @@ def main():
     logger.info("Initializing Trade Manager...")
     trade_mgr = TradeManager(paradex_client)
 
+    # Set authenticated client for strategy candle/BBO fetching
+    from strategy import set_paradex_client
+    set_paradex_client(paradex_client)
+
     logger.info("Building Telegram bot...")
     tg_bot = MomathiTelegramBot(trade_mgr)
     app = tg_bot.build()
