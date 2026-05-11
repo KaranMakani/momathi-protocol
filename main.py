@@ -77,33 +77,8 @@ async def fill_check_loop(trade_mgr: TradeManager, tg_bot: MomathiTelegramBot):
                     )
                     await tg_bot.notify(msg)
 
-            # ── 2. Pyramid check (Phase 1: arm / Phase 2: fire) ───────
-            pyramid_events = await loop.run_in_executor(None, trade_mgr.check_pyramid)
-            for ev in pyramid_events:
-                if ev["type"] == "armed":
-                    msg = (
-                        f"🔺 <b>Pyramid Armed — {ev['coin']} {ev['direction']}</b>\n\n"
-                        f"💰 1:1 RR Level: <b>{ev['pyramid_level']:.4f}</b>\n"
-                        f"📈 Mark Price: <b>{ev['mark_price']:.4f}</b>\n\n"
-                        f"Watching EMA30 → will add when EMA30 reaches original entry."
-                    )
-                elif ev["type"] == "fired":
-                    cp = ev.get("current_price")
-                    cp_str = f"{cp:.4f}" if cp else "N/A"
-                    msg = (
-                        f"🔥 <b>Pyramid Fired! — {ev['coin']} {ev['direction']}</b>\n\n"
-                        f"➕ Added: <b>{ev['pyramid_size']:.6f}</b>\n"
-                        f"📊 EMA30: <b>{ev['ema30']:.4f}</b>\n"
-                        f"📈 Price: <b>{cp_str}</b>\n"
-                        f"🛑 New SL: <b>{ev['new_sl']:.4f}</b> (EMA30 trailing ON)\n"
-                        f"🎯 New TP: <b>{ev['new_tp']:.4f}</b> (squeezed 15%)"
-                    )
-                else:
-                    continue
-                await tg_bot.notify(msg)
-
         except Exception as e:
-            logger.error("Fill/pyramid check error: %s", e, exc_info=True)
+            logger.error("Fill check error: %s", e, exc_info=True)
 
 
 async def order_update_loop(trade_mgr: TradeManager, tg_bot: MomathiTelegramBot):
@@ -174,16 +149,6 @@ async def order_update_loop(trade_mgr: TradeManager, tg_bot: MomathiTelegramBot)
                 )
                 await tg_bot.notify(msg)
 
-            # ── 2. Trail SL at EMA30 for pyramided trades ─────────────
-            trailing_updates = await loop.run_in_executor(None, trade_mgr.update_trailing_sl, closed_tfs)
-            for t in trailing_updates:
-                msg = (
-                    f"📈 <b>Trailing SL Moved — {t['coin']} {t['direction']}</b>\n\n"
-                    f"🛑 SL: {t['old_sl']:.4f} → <b>{t['new_sl']:.4f}</b>\n"
-                    f"📊 EMA30: <b>{t['ema30']:.4f}</b>"
-                )
-                await tg_bot.notify(msg)
-
         except Exception as e:
             logger.error("Order update error: %s", e, exc_info=True)
 
@@ -209,8 +174,6 @@ async def post_init(app):
                         "🍅 <b>Momathi Bot Started!</b>\n\n"
                 f"💰 Risk: <b>${config.runtime['risk_usd']:.2f}</b>\n"
                 f"📊 Strategy: EMA 8/30 (5m or 15m)\n"
-                f"🔺 Pyramid: {'ON' if config.PYRAMID_ENABLED else 'OFF'} "
-                f"(add {int(config.PYRAMID_ADD_PCT*100)}% @ EMA30→entry, trail SL)\n"
                 f"🔄 Auto-update: every 5m candle (sync)\n"
                 f"⚡ Fill check: every 60s\n\n"
                 "Trade: /<b>coin</b> <b>direction</b> <b>timeframe</b>\n"

@@ -27,14 +27,3 @@ runtime = {
 EMA_FAST = 8      # Entry EMA
 EMA_SLOW = 30     # SL / Trend EMA
 CANDLE_LIMIT = 100  # candles to fetch for EMA computation
-
-# ── Pyramid settings (add-on after 1:1 RR) ──────────────────────
-# After entry fills and price hits the 1:1 RR level, the bot monitors
-# EMA30 on the execution TF. When EMA30 rises (LONG) or falls (SHORT)
-# within PYRAMID_TRIGGER_PCT of the original entry price, a market add
-# is fired. The SL then trails at EMA30 every candle.
-PYRAMID_ENABLED     = True   # master on/off switch
-PYRAMID_ADD_PCT     = 0.15   # size of add = 15% of base position size
-PYRAMID_TRIGGER_PCT = 0.003  # fire add when EMA30 is within 0.3% of original entry
-PYRAMID_SL_BUFFER   = 0.0003 # new SL placed 0.03% below (LONG) / above (SHORT) EMA30
-PYRAMID_TP_SQUEEZE  = 0.15   # pull TP 15% closer to current price after the add
