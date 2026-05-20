@@ -241,7 +241,7 @@ class TradeManager:
 
             logger.info("Fill check: %s %s | entry_oid=%s | checking if still open...", direction, coin, entry_oid)
             entry_still_open = any(
-                o.get("oid") == entry_oid for o in open_orders
+                str(o.get("oid")) == str(entry_oid) for o in open_orders
             )
             logger.info("Fill check: %s %s | entry_still_open=%s", direction, coin, entry_still_open)
 
