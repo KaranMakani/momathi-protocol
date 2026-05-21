@@ -310,7 +310,7 @@ class TradeManager:
             open_orders = self.client.get_open_orders()
             entry_oid = trade.get("entry_oid")
             entry_still_open = any(
-                o.get("oid") == entry_oid for o in open_orders
+                str(o.get("oid")) == str(entry_oid) for o in open_orders
             ) if entry_oid else False
 
             if not entry_still_open:
