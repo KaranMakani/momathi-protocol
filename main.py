@@ -77,7 +77,7 @@ async def order_update_loop(trade_mgr: TradeManager, tg_bot: MomathiTelegramBot)
         interval = min_tf * 60
         now = time.time()
         sleep_time = interval - (now % interval)
-        await asyncio.sleep(sleep_time + 3)
+        await asyncio.sleep(sleep_time + 30)  # Wait 30s after candle boundary for more stable data
 
         if not runtime["running"]:
             break
