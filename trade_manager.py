@@ -147,7 +147,11 @@ class TradeManager:
         # If filled immediately, place TP/SL right now
         if filled_immediately:
             logger.info("Entry filled immediately, placing TP/SL triggers")
-            self._place_tpsl(trade)
+            try:
+                self._place_tpsl(trade)
+            except Exception as e:
+                logger.error("CRITICAL: Failed to place TP/SL for %s %s: %s", coin, direction, e)
+                # Keep trade tracked so we can retry in check_fills loop
 
         self.active_trades.append(trade)
         self._save_trades()
@@ -169,6 +173,11 @@ class TradeManager:
             coin, is_buy=not is_buy, size=size, trigger_px=sl, tpsl="sl", reduce_only=True
         )
         logger.info("SL result for %s: %s", coin, sl_res)
+        
+        if sl_res.get("status") != "ok":
+            logger.error("FAILED to place SL for %s %s: %s", coin, trade["direction"], sl_res)
+            raise Exception(f"SL placement failed: {sl_res.get('msg', sl_res)}")
+        
         trade["sl_oid"] = sl_res.get("oid")
 
         # Place TP
@@ -177,9 +186,15 @@ class TradeManager:
             coin, is_buy=not is_buy, size=size, trigger_px=tp, tpsl="tp", reduce_only=True
         )
         logger.info("TP result for %s: %s", coin, tp_res)
+        
+        if tp_res.get("status") != "ok":
+            logger.error("FAILED to place TP for %s %s: %s", coin, trade["direction"], tp_res)
+            raise Exception(f"TP placement failed: {tp_res.get('msg', tp_res)}")
+        
         trade["tp_oid"] = tp_res.get("oid")
         
-        logger.info("Placed TP/SL for %s: SL_OID=%s, TP_OID=%s", coin, trade["sl_oid"], trade["tp_oid"])
+        logger.info("✅ Successfully placed TP/SL for %s %s: SL_OID=%s, TP_OID=%s", 
+                    coin, trade["direction"], trade["sl_oid"], trade["tp_oid"])
 
     # ── Fast fill check (60s loop) ─────────────────────────────
 
@@ -257,14 +272,21 @@ class TradeManager:
                     logger.info(
                         "Fill check: %s %s filled → placing TP/SL", direction, coin
                     )
-                    self._place_tpsl(trade)
-                    filled_trades.append({
-                        "coin": coin,
-                        "direction": direction,
-                        "entry": trade["entry"],
-                        "sl": trade["sl"],
-                        "tp": trade["tp"],
-                    })
+                    try:
+                        self._place_tpsl(trade)
+                        filled_trades.append({
+                            "coin": coin,
+                            "direction": direction,
+                            "entry": trade["entry"],
+                            "sl": trade["sl"],
+                            "tp": trade["tp"],
+                        })
+                    except Exception as e:
+                        logger.error(
+                            "CRITICAL: Fill check failed to place TP/SL for %s %s: %s — will retry next cycle",
+                            direction, coin, e,
+                        )
+                        # Don't add to filled_trades (no notification yet), keep trade for retry
                     needs_save = True
                 else:
                     # Order was cancelled externally (e.g. /close_all) — remove from tracking
@@ -320,7 +342,10 @@ class TradeManager:
                 if has_position:
                     trade["filled"] = True
                     logger.info("Trade %s %s filled, placing TP/SL now", direction, coin)
-                    self._place_tpsl(trade)
+                    try:
+                        self._place_tpsl(trade)
+                    except Exception as e:
+                        logger.error("CRITICAL: update_pending_orders failed to place TP/SL for %s %s: %s", direction, coin, e)
                     self._save_trades()
                     continue
                 else:

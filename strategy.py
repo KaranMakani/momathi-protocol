@@ -6,6 +6,7 @@ import logging
 import time
 import requests
 import pandas as pd
+from datetime import datetime
 
 import config
 
@@ -288,3 +289,120 @@ def validate_signal(direction: str, coin: str = None, exec_tf: str = "5") -> dic
         "ema30": round(ema30, decimals),
         "exec_tf": exec_tf,
     }
+
+
+def scan_1h_regime(coins: list = None) -> dict:
+    """
+    Scan a watchlist on 1H timeframe and classify each token as:
+    - CLEAN LONG BIAS (EMA8 > EMA15 > EMA30, all slopes up, spread >= 0.4%)
+    - CLEAN SHORT BIAS (EMA8 < EMA15 < EMA30, all slopes down, spread >= 0.4%)
+    - TANGLED (everything else — skip)
+    
+    Returns:
+    {
+        "long_bias": [{"coin": "BTC", "spread_pct": 1.20}, ...],
+        "short_bias": [{"coin": "ETH", "spread_pct": 0.90}, ...],
+        "tangled": ["BNB", "HYPE", ...],
+        "errors": [{"coin": "XRP", "reason": "..."}],
+        "timestamp": "2026-05-21 06:00:00 UTC",
+        "last_candle_close": "2026-05-21 06:00:00 UTC"
+    }
+    """
+    if coins is None:
+        coins = config.SCAN_WATCHLIST
+    
+    result = {
+        "long_bias": [],
+        "short_bias": [],
+        "tangled": [],
+        "errors": [],
+        "timestamp": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC"),
+        "last_candle_close": None,
+    }
+    
+    for coin in coins:
+        try:
+            # Fetch 1H candles (need at least 35: 30 for EMA + 5 for slope)
+            df = fetch_candles(coin, resolution="60")
+            if df.empty or len(df) < 40:
+                result["errors"].append({
+                    "coin": coin,
+                    "reason": f"Insufficient data (got {len(df)} candles)"
+                })
+                continue
+            
+            # Compute EMAs
+            df = compute_emas(df)
+            
+            # Get current and historical values
+            current = df.iloc[-1]
+            past_idx = -1 - config.SCAN_SLOPE_LOOKBACK
+            past = df.iloc[past_idx]
+            
+            # Calculate spread
+            current_price = float(current["close"])
+            ema8 = float(current["ema8"])
+            ema15 = float(current["ema15"])
+            ema30 = float(current["ema30"])
+            
+            spread_pct = abs(ema8 - ema30) / current_price * 100
+            
+            # Calculate slopes
+            def get_slope(current_val, past_val):
+                if past_val == 0:
+                    return "flat"
+                pct_change = (current_val - past_val) / past_val * 100
+                if pct_change > config.SCAN_SLOPE_THRESHOLD:
+                    return "up"
+                elif pct_change < -config.SCAN_SLOPE_THRESHOLD:
+                    return "down"
+                else:
+                    return "flat"
+            
+            ema8_slope = get_slope(ema8, float(past["ema8"]))
+            ema15_slope = get_slope(ema15, float(past["ema15"]))
+            ema30_slope = get_slope(ema30, float(past["ema30"]))
+            
+            # Get last closed candle time
+            if result["last_candle_close"] is None:
+                ts = int(current["timestamp"]) / 1000
+                result["last_candle_close"] = datetime.utcfromtimestamp(ts).strftime("%Y-%m-%d %H:%M:%S UTC")
+            
+            # Classification logic
+            is_clean_long = (
+                ema8 > ema15 > ema30 and
+                ema8_slope == "up" and ema15_slope == "up" and ema30_slope == "up" and
+                spread_pct >= config.SCAN_SPREAD_THRESHOLD
+            )
+            
+            is_clean_short = (
+                ema8 < ema15 < ema30 and
+                ema8_slope == "down" and ema15_slope == "down" and ema30_slope == "down" and
+                spread_pct >= config.SCAN_SPREAD_THRESHOLD
+            )
+            
+            if is_clean_long:
+                result["long_bias"].append({
+                    "coin": coin,
+                    "spread_pct": round(spread_pct, 2)
+                })
+            elif is_clean_short:
+                result["short_bias"].append({
+                    "coin": coin,
+                    "spread_pct": round(spread_pct, 2)
+                })
+            else:
+                result["tangled"].append(coin)
+                
+        except Exception as e:
+            result["errors"].append({
+                "coin": coin,
+                "reason": str(e)
+            })
+    
+    # Sort by spread (largest first)
+    result["long_bias"].sort(key=lambda x: x["spread_pct"], reverse=True)
+    result["short_bias"].sort(key=lambda x: x["spread_pct"], reverse=True)
+    
+    return result
+

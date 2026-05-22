@@ -64,6 +64,7 @@ class MomathiTelegramBot:
             ("get_risk", self.cmd_get_risk),
             ("close_all", self.cmd_close_all),
             ("stop_bot", self.cmd_stop_bot),
+            ("scan", self.cmd_scan),
         ]
         for name, callback in handlers:
             self.app.add_handler(CommandHandler(name, callback))
@@ -100,6 +101,7 @@ class MomathiTelegramBot:
         """Register bot commands in Telegram menu."""
         commands = [
             BotCommand("start", "Welcome & command list"),
+            BotCommand("scan", "1H EMA regime scan"),
             BotCommand("status", "View open positions & orders"),
             BotCommand("balance", "Account balance"),
             BotCommand("pnl", "Unrealized PnL"),
@@ -350,3 +352,63 @@ class MomathiTelegramBot:
         config.runtime["running"] = False
         # Stop the application gracefully
         asyncio.get_event_loop().call_later(1, lambda: os.kill(os.getpid(), signal.SIGINT))
+
+    @auth
+    async def cmd_scan(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Scan 1H EMA regime for all tokens in watchlist."""
+        from strategy import scan_1h_regime
+        
+        msg = await update.message.reply_text("🔍 Scanning 1H EMA regime...")
+        
+        try:
+            result = scan_1h_regime()
+            
+            # Build message
+            lines = [
+                f"📊 <b>1H EMA SCAN</b> — {result['timestamp']}",
+                f"Last closed candle: {result['last_candle_close']}",
+                ""
+            ]
+            
+            # Long bias
+            if result["long_bias"]:
+                lines.append("🟢 <b>LONG BIAS</b>")
+                for item in result["long_bias"]:
+                    lines.append(f"• {item['coin']}USDT  spread {item['spread_pct']:.2f}%")
+                lines.append("")
+            else:
+                lines.append("🟢 <b>LONG BIAS</b>: None")
+                lines.append("")
+            
+            # Short bias
+            if result["short_bias"]:
+                lines.append("🔴 <b>SHORT BIAS</b>")
+                for item in result["short_bias"]:
+                    lines.append(f"• {item['coin']}USDT  spread {item['spread_pct']:.2f}%")
+                lines.append("")
+            else:
+                lines.append("🔴 <b>SHORT BIAS</b>: None")
+                lines.append("")
+            
+            # Tangled
+            if result["tangled"]:
+                lines.append("⚪ <b>TANGLED (skip)</b>")
+                # Split into chunks of 8 for readability
+                for i in range(0, len(result["tangled"]), 8):
+                    chunk = result["tangled"][i:i+8]
+                    lines.append(", ".join(f"{c}USDT" for c in chunk))
+                lines.append("")
+            
+            # Errors
+            if result["errors"]:
+                lines.append("⚠️ <b>ERRORS</b>")
+                for err in result["errors"]:
+                    lines.append(f"• {err['coin']}USDT — {err['reason']}")
+                lines.append("")
+            
+            lines.append(f"📈 Trade only CLEAN tokens with 5m/15m strategy")
+            
+            await msg.edit_text("\n".join(lines), parse_mode="HTML")
+            
+        except Exception as e:
+            await msg.edit_text(f"❌ Scan failed: {e}", parse_mode="HTML")

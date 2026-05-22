@@ -27,3 +27,12 @@ runtime = {
 EMA_FAST = 8      # Entry EMA
 EMA_SLOW = 30     # SL / Trend EMA
 CANDLE_LIMIT = 100  # candles to fetch for EMA computation
+
+# ── 1H EMA Scan Configuration ──────────────────────────────────
+SCAN_WATCHLIST = [
+    "BTC", "ETH", "BNB", "HYPE", "NEAR", "SOL", "TRX",
+    "APT", "ARB", "AVAX", "DOGE", "LINK", "OP", "XRP", "ZEC", "TON"
+]
+SCAN_SPREAD_THRESHOLD = 0.4  # minimum spread % for CLEAN classification
+SCAN_SLOPE_LOOKBACK = 5      # candles ago for slope calculation
+SCAN_SLOPE_THRESHOLD = 0.05  # % change to consider "up" or "down"
