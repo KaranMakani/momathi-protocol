@@ -6,6 +6,7 @@ import logging
 import os
 import signal
 import asyncio
+from datetime import datetime, timezone
 from functools import wraps
 
 from telegram import Update, BotCommand
@@ -410,6 +411,64 @@ class MomathiTelegramBot:
             
         except Exception as e:
             await msg.edit_text(f"❌ Scan failed: {e}", parse_mode="HTML")
+
+    async def send_consolidated_regime_alert(self, alerts: list) -> None:
+        """Send a consolidated regime change notification with all tokens grouped by state."""
+        if not alerts:
+            return
+
+        # Group alerts by type
+        long_tokens = []
+        short_tokens = []
+        left_clean_tokens = []
+
+        for alert in alerts:
+            token = alert["token"]
+            alert_type = alert["alert_type"]
+            state = alert["state"]
+            consecutive = state["consecutive_count"]
+
+            if alert_type == "ENTERED_CLEAN":
+                current_state = state["current_state"]
+                if current_state == "CLEAN_LONG":
+                    long_tokens.append((token, consecutive))
+                elif current_state == "CLEAN_SHORT":
+                    short_tokens.append((token, consecutive))
+            elif alert_type == "LEFT_CLEAN":
+                previous_state = state["previous_state"]
+                left_clean_tokens.append((token, previous_state, state["current_state"]))
+
+        # Build consolidated message
+        lines = []
+
+        # Long bias section
+        if long_tokens:
+            lines.append("🟢 <b>REGIME CHANGE — LONG BIAS</b>")
+            lines.append("<i>Entered CLEAN_LONG (eligible for long entries)</i>")
+            for token, count in long_tokens:
+                lines.append(f"• <b>{token}</b> (confirmed for {count} consecutive checks)")
+            lines.append("")
+
+        # Short bias section
+        if short_tokens:
+            lines.append("🔴 <b>REGIME CHANGE — SHORT BIAS</b>")
+            lines.append("<i>Entered CLEAN_SHORT (eligible for short entries)</i>")
+            for token, count in short_tokens:
+                lines.append(f"• <b>{token}</b> (confirmed for {count} consecutive checks)")
+            lines.append("")
+
+        # Left clean section
+        if left_clean_tokens:
+            lines.append("⚪ <b>REGIME LOST</b>")
+            lines.append("<i>Exited CLEAN regime (review positions)</i>")
+            for token, prev, curr in left_clean_tokens:
+                lines.append(f"• <b>{token}</b>: {prev} → {curr}")
+            lines.append("")
+
+        lines.append(f"📊 Scan time: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}")
+
+        msg = "\n".join(lines)
+        await self.notify(msg)
 
     async def send_regime_alert(self, token: str, token_state: dict,
                                 alert_type: str) -> None:

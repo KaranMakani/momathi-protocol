@@ -106,8 +106,9 @@ def fetch_candles(coin: str = None, resolution: str = "5", paradex_client: Parad
         # Sort chronologically
         df = df.sort_values("timestamp").reset_index(drop=True)
         
-        # Drop the currently-forming (live) candle — only use closed candles
-        df = df.iloc[:-1]
+        # Keep all candles including the currently-forming one.
+        # Reverted on user request — EMAs will now include intra-candle 
+        # data. Previously dropped via df.iloc[:-1] to match chart values.
         
         logger.info(f"fetch_candles: {symbol} {res_label} returned {len(df)} candles, first={df.iloc[0]['timestamp']}, last={df.iloc[-1]['timestamp']}")
         

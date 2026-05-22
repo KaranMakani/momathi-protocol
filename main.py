@@ -168,6 +168,9 @@ async def regime_watcher_loop(trade_mgr: TradeManager, telegram_bot: MomathiTele
             scan_result = trade_mgr.scan_regime()
             now = datetime.now(timezone.utc)
 
+            # Collect all alerts for this cycle
+            alerts_to_send = []
+
             for token in SCAN_WATCHLIST:
                 new_state = _derive_state_from_scan(scan_result, token)
 
@@ -183,10 +186,16 @@ async def regime_watcher_loop(trade_mgr: TradeManager, telegram_bot: MomathiTele
                 )
 
                 if should:
-                    await telegram_bot.send_regime_alert(
-                        token, state[token], alert_type
-                    )
+                    alerts_to_send.append({
+                        "token": token,
+                        "alert_type": alert_type,
+                        "state": state[token],
+                    })
                     state = mark_alerted(state, token, now)
+
+            # Send consolidated alert if any tokens triggered
+            if alerts_to_send:
+                await telegram_bot.send_consolidated_regime_alert(alerts_to_send)
 
             save_regime_state(state)
 
