@@ -1,11 +1,11 @@
-import config
+from config.settings import PARADEX_L1_ADDRESS, PARADEX_PRIVATE_KEY
 from paradex_py import Paradex
 
 if __name__ == '__main__':
     client = Paradex(
         env="prod",
-        l1_address=config.PARADEX_L1_ADDRESS,
-        l2_private_key=config.PARADEX_PRIVATE_KEY
+        l1_address=PARADEX_L1_ADDRESS,
+        l2_private_key=PARADEX_PRIVATE_KEY
     )
     
     # 1. Check AccountSummary

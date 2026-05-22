@@ -7,30 +7,25 @@ import time
 import requests
 import pandas as pd
 from datetime import datetime
+from typing import Optional
 
-import config
+from config.settings import (
+    PARADEX_ENV, EMA_FAST, EMA_SLOW, CANDLE_LIMIT, MIN_CANDLES, runtime
+)
+from exchange.paradex_client import ParadexClient
 
 logger = logging.getLogger("momathi.strategy")
 
 # ── Paradex API base URL (authenticated) ─────────────────────────
-_is_prod = config.PARADEX_ENV in ("PROD", "MAINNET")
+_is_prod = PARADEX_ENV in ("PROD", "MAINNET")
 _PARADEX_API_URL = "https://api.prod.paradex.trade/v1" if _is_prod else "https://api.testnet.paradex.trade/v1"
 
-# Global reference to authenticated ParadexClient (set by main.py)
-_paradex_client = None
 
-
-def set_paradex_client(client):
-    """Set the authenticated ParadexClient for candle/BBO fetching."""
-    global _paradex_client
-    _paradex_client = client
-
-
-def _get_auth_headers():
+def _get_auth_headers(paradex_client: ParadexClient) -> dict:
     """Get JWT Bearer token from the ParadexClient for authenticated API requests."""
-    if _paradex_client and hasattr(_paradex_client, 'client'):
+    if paradex_client and hasattr(paradex_client, 'client'):
         try:
-            px_client = _paradex_client.client
+            px_client = paradex_client.client
             if hasattr(px_client, 'account') and px_client.account:
                 # Get JWT token from account (set after onboarding/auth)
                 jwt_token = getattr(px_client.account, 'jwt_token', None)
@@ -48,15 +43,19 @@ def _get_auth_headers():
     return {}
 
 
-def fetch_candles(coin: str = None, resolution: str = "5") -> pd.DataFrame:
+def fetch_candles(coin: str = None, resolution: str = "5", paradex_client: ParadexClient = None) -> pd.DataFrame:
     """
     Fetch OHLCV candles for the given coin from Paradex REST API.
+    
     Args:
         coin: Trading pair (e.g. "BTC")
         resolution: Candle resolution ("5" = 5min, "15" = 15min, "60" = 1H)
-    Returns a DataFrame with columns: timestamp, open, high, low, close, volume.
+        paradex_client: Authenticated ParadexClient for JWT token
+    
+    Returns:
+        DataFrame with columns: timestamp, open, high, low, close, volume.
     """
-    coin = coin or config.runtime["coin"]
+    coin = coin or runtime["coin"]
     symbol = f"{coin}-USD-PERP"
     res_labels = {"5": "5m", "15": "15m", "60": "1H"}
     res_label = res_labels.get(resolution, f"{resolution}m")
@@ -65,7 +64,16 @@ def fetch_candles(coin: str = None, resolution: str = "5") -> pd.DataFrame:
     # Calculate timestamps based on resolution
     res_minutes = int(resolution)
     end_at = int(time.time() * 1000)
-    start_at = end_at - (config.CANDLE_LIMIT * res_minutes * 60 * 1000)
+    start_at = end_at - (CANDLE_LIMIT * res_minutes * 60 * 1000)
+    
+    # Diagnostic logging
+    from datetime import datetime as dt
+    logger.info(
+        f"fetch_candles request: {symbol} {res_label} | "
+        f"end_at={end_at} ({dt.utcfromtimestamp(end_at/1000).strftime('%Y-%m-%d %H:%M:%S UTC')}) | "
+        f"start_at={start_at} ({dt.utcfromtimestamp(start_at/1000).strftime('%Y-%m-%d %H:%M:%S UTC')}) | "
+        f"api_url={_PARADEX_API_URL}/markets/klines"
+    )
 
     try:
         resp = requests.get(
@@ -76,7 +84,7 @@ def fetch_candles(coin: str = None, resolution: str = "5") -> pd.DataFrame:
                 "start_at": start_at,
                 "end_at": end_at,
             },
-            headers=_get_auth_headers(),
+            headers=_get_auth_headers(paradex_client),
             timeout=10,
         )
         resp.raise_for_status()
@@ -97,6 +105,12 @@ def fetch_candles(coin: str = None, resolution: str = "5") -> pd.DataFrame:
 
         # Sort chronologically
         df = df.sort_values("timestamp").reset_index(drop=True)
+        
+        # Drop the currently-forming (live) candle — only use closed candles
+        df = df.iloc[:-1]
+        
+        logger.info(f"fetch_candles: {symbol} {res_label} returned {len(df)} candles, first={df.iloc[0]['timestamp']}, last={df.iloc[-1]['timestamp']}")
+        
         return df
 
     except Exception as e:
@@ -105,20 +119,39 @@ def fetch_candles(coin: str = None, resolution: str = "5") -> pd.DataFrame:
 
 
 def compute_emas(df: pd.DataFrame) -> pd.DataFrame:
-    """Add EMA 8 and 30 columns to the DataFrame."""
-    df["ema8"] = df["close"].ewm(span=config.EMA_FAST, adjust=False).mean()
-    df["ema30"] = df["close"].ewm(span=config.EMA_SLOW, adjust=False).mean()
+    """
+    Add EMA 8, 15, and 30 columns to the DataFrame.
+    
+    Args:
+        df: DataFrame with 'close' column
+    
+    Returns:
+        DataFrame with added 'ema8', 'ema15', 'ema30' columns.
+    """
+    df["ema8"] = df["close"].ewm(span=EMA_FAST, adjust=False).mean()
+    df["ema15"] = df["close"].ewm(span=15, adjust=False).mean()
+    df["ema30"] = df["close"].ewm(span=EMA_SLOW, adjust=False).mean()
+    
+    logger.info(f"compute_emas: input_len={len(df)}, ema8_first={df['ema8'].iloc[0]}, ema8_last={df['ema8'].iloc[-1]}, ema30_first={df['ema30'].iloc[0]}, ema30_last={df['ema30'].iloc[-1]}")
+    
     return df
 
 
-def get_ema30(coin: str, exec_tf: str = "5") -> float | None:
+def get_ema30(coin: str, exec_tf: str = "5", paradex_client: ParadexClient = None) -> Optional[float]:
     """
     Lightweight: fetch just the latest EMA30 on exec_tf.
     No trend check, no full validate_signal overhead.
-    Used by the pyramid checker every 60 s.
+    
+    Args:
+        coin: Trading pair (e.g. "BTC")
+        exec_tf: Execution timeframe ("5" or "15")
+        paradex_client: Authenticated ParadexClient
+    
+    Returns:
+        EMA30 value or None if failed.
     """
     try:
-        df = fetch_candles(coin, resolution=exec_tf)
+        df = fetch_candles(coin, resolution=exec_tf, paradex_client=paradex_client)
         if df.empty:
             return None
         df = compute_emas(df)
@@ -128,12 +161,19 @@ def get_ema30(coin: str, exec_tf: str = "5") -> float | None:
         return None
 
 
-def get_mark_price(coin: str) -> float | None:
+def get_mark_price(coin: str, paradex_client: ParadexClient = None) -> Optional[float]:
     """
     Return the current approximate price for a coin using latest 5m kline close.
+    
+    Args:
+        coin: Trading pair (e.g. "BTC")
+        paradex_client: Authenticated ParadexClient
+    
+    Returns:
+        Mark price or None if failed.
     """
     try:
-        df = fetch_candles(coin, resolution="5")
+        df = fetch_candles(coin, resolution="5", paradex_client=paradex_client)
         if not df.empty:
             return float(df.iloc[-1]["close"])
     except Exception as e:
@@ -141,12 +181,15 @@ def get_mark_price(coin: str) -> float | None:
     return None
 
 
-
-
 def get_trend(df: pd.DataFrame) -> str:
     """
     Determine the trend based on 8 EMA vs 30 EMA.
-    Returns 'LONG' if 8 EMA > 30 EMA, 'SHORT' if 8 EMA < 30 EMA.
+    
+    Args:
+        df: DataFrame with 'ema8' and 'ema30' columns
+    
+    Returns:
+        'LONG' if 8 EMA > 30 EMA, 'SHORT' if 8 EMA < 30 EMA.
     """
     latest = df.iloc[-1]
     if latest["ema8"] > latest["ema30"]:
@@ -173,6 +216,14 @@ def calculate_levels(ema8: float, ema30: float, direction: str) -> dict:
     - Entry: exact EMA 8
     - SL: exact EMA 30
     - TP: 1:3 risk-reward from entry
+    
+    Args:
+        ema8: EMA 8 value
+        ema30: EMA 30 value
+        direction: "LONG" or "SHORT"
+    
+    Returns:
+        Dict with 'entry', 'sl', 'tp', 'risk_per_unit'.
     """
     decimals = _price_precision(ema8)
 
@@ -195,36 +246,38 @@ def calculate_levels(ema8: float, ema30: float, direction: str) -> dict:
     }
 
 
-def validate_signal(direction: str, coin: str = None, exec_tf: str = "5") -> dict:
+def validate_signal(direction: str, coin: str = None, exec_tf: str = "5", paradex_client: ParadexClient = None) -> dict:
     """
     Validate whether a trade signal is allowed.
     1. Fetch 1H candles → determine trend (higher-timeframe filter)
     2. Check if direction aligns with 1H trend
     3. Fetch exec_tf candles → compute entry/SL/TP levels
     4. If valid, return trade levels; if not, return rejection reason
-
+    
     Args:
         direction: "LONG" or "SHORT"
         coin: Trading pair (e.g. "BTC")
         exec_tf: Execution timeframe resolution ("5" or "15")
-
+        paradex_client: Authenticated ParadexClient
+    
     Returns:
-        {
-            "valid": bool,
-            "reason": str (only if invalid),
-            "trend": str,
-            "levels": dict (only if valid),
-            "ema8": float,
-            "ema30": float,
-            "exec_tf": str,
-        }
+        Dict with 'valid', optional 'reason', 'trend', optional 'levels', 'ema8', 'ema30', 'exec_tf'.
     """
-    coin = coin or config.runtime["coin"]
+    coin = coin or runtime["coin"]
     tf_label = "5m" if exec_tf == "5" else "15m"
 
     # ── Step 1: Fetch 1H candles for TREND determination ──
     try:
-        df_1h = fetch_candles(coin, resolution="60")
+        df_1h = fetch_candles(coin, resolution="60", paradex_client=paradex_client)
+        if len(df_1h) < MIN_CANDLES:
+            logger.warning(
+                f"validate_signal: insufficient 1H candles for {coin} "
+                f"(got {len(df_1h)}, need {MIN_CANDLES}) — rejecting trade"
+            )
+            return {
+                "valid": False,
+                "reason": f"❌ Insufficient 1H data for {coin} (got {len(df_1h)} candles, need {MIN_CANDLES})"
+            }
         df_1h = compute_emas(df_1h)
     except Exception as e:
         logger.error("Failed to fetch 1H candles: %s", e)
@@ -255,7 +308,16 @@ def validate_signal(direction: str, coin: str = None, exec_tf: str = "5") -> dic
 
     # ── Step 2: Fetch exec_tf candles for ENTRY/SL/TP levels ──
     try:
-        df_exec = fetch_candles(coin, resolution=exec_tf)
+        df_exec = fetch_candles(coin, resolution=exec_tf, paradex_client=paradex_client)
+        if len(df_exec) < MIN_CANDLES:
+            logger.warning(
+                f"validate_signal: insufficient {tf_label} candles for {coin} "
+                f"(got {len(df_exec)}, need {MIN_CANDLES}) — rejecting trade"
+            )
+            return {
+                "valid": False,
+                "reason": f"❌ Insufficient {tf_label} data for {coin} (got {len(df_exec)} candles, need {MIN_CANDLES})"
+            }
         df_exec = compute_emas(df_exec)
     except Exception as e:
         logger.error("Failed to fetch %s candles: %s", tf_label, e)
@@ -289,120 +351,3 @@ def validate_signal(direction: str, coin: str = None, exec_tf: str = "5") -> dic
         "ema30": round(ema30, decimals),
         "exec_tf": exec_tf,
     }
-
-
-def scan_1h_regime(coins: list = None) -> dict:
-    """
-    Scan a watchlist on 1H timeframe and classify each token as:
-    - CLEAN LONG BIAS (EMA8 > EMA15 > EMA30, all slopes up, spread >= 0.4%)
-    - CLEAN SHORT BIAS (EMA8 < EMA15 < EMA30, all slopes down, spread >= 0.4%)
-    - TANGLED (everything else — skip)
-    
-    Returns:
-    {
-        "long_bias": [{"coin": "BTC", "spread_pct": 1.20}, ...],
-        "short_bias": [{"coin": "ETH", "spread_pct": 0.90}, ...],
-        "tangled": ["BNB", "HYPE", ...],
-        "errors": [{"coin": "XRP", "reason": "..."}],
-        "timestamp": "2026-05-21 06:00:00 UTC",
-        "last_candle_close": "2026-05-21 06:00:00 UTC"
-    }
-    """
-    if coins is None:
-        coins = config.SCAN_WATCHLIST
-    
-    result = {
-        "long_bias": [],
-        "short_bias": [],
-        "tangled": [],
-        "errors": [],
-        "timestamp": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC"),
-        "last_candle_close": None,
-    }
-    
-    for coin in coins:
-        try:
-            # Fetch 1H candles (need at least 35: 30 for EMA + 5 for slope)
-            df = fetch_candles(coin, resolution="60")
-            if df.empty or len(df) < 40:
-                result["errors"].append({
-                    "coin": coin,
-                    "reason": f"Insufficient data (got {len(df)} candles)"
-                })
-                continue
-            
-            # Compute EMAs
-            df = compute_emas(df)
-            
-            # Get current and historical values
-            current = df.iloc[-1]
-            past_idx = -1 - config.SCAN_SLOPE_LOOKBACK
-            past = df.iloc[past_idx]
-            
-            # Calculate spread
-            current_price = float(current["close"])
-            ema8 = float(current["ema8"])
-            ema15 = float(current["ema15"])
-            ema30 = float(current["ema30"])
-            
-            spread_pct = abs(ema8 - ema30) / current_price * 100
-            
-            # Calculate slopes
-            def get_slope(current_val, past_val):
-                if past_val == 0:
-                    return "flat"
-                pct_change = (current_val - past_val) / past_val * 100
-                if pct_change > config.SCAN_SLOPE_THRESHOLD:
-                    return "up"
-                elif pct_change < -config.SCAN_SLOPE_THRESHOLD:
-                    return "down"
-                else:
-                    return "flat"
-            
-            ema8_slope = get_slope(ema8, float(past["ema8"]))
-            ema15_slope = get_slope(ema15, float(past["ema15"]))
-            ema30_slope = get_slope(ema30, float(past["ema30"]))
-            
-            # Get last closed candle time
-            if result["last_candle_close"] is None:
-                ts = int(current["timestamp"]) / 1000
-                result["last_candle_close"] = datetime.utcfromtimestamp(ts).strftime("%Y-%m-%d %H:%M:%S UTC")
-            
-            # Classification logic
-            is_clean_long = (
-                ema8 > ema15 > ema30 and
-                ema8_slope == "up" and ema15_slope == "up" and ema30_slope == "up" and
-                spread_pct >= config.SCAN_SPREAD_THRESHOLD
-            )
-            
-            is_clean_short = (
-                ema8 < ema15 < ema30 and
-                ema8_slope == "down" and ema15_slope == "down" and ema30_slope == "down" and
-                spread_pct >= config.SCAN_SPREAD_THRESHOLD
-            )
-            
-            if is_clean_long:
-                result["long_bias"].append({
-                    "coin": coin,
-                    "spread_pct": round(spread_pct, 2)
-                })
-            elif is_clean_short:
-                result["short_bias"].append({
-                    "coin": coin,
-                    "spread_pct": round(spread_pct, 2)
-                })
-            else:
-                result["tangled"].append(coin)
-                
-        except Exception as e:
-            result["errors"].append({
-                "coin": coin,
-                "reason": str(e)
-            })
-    
-    # Sort by spread (largest first)
-    result["long_bias"].sort(key=lambda x: x["spread_pct"], reverse=True)
-    result["short_bias"].sort(key=lambda x: x["spread_pct"], reverse=True)
-    
-    return result
-

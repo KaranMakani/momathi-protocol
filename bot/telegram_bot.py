@@ -17,9 +17,8 @@ from telegram.ext import (
     filters,
 )
 
-import config
-from strategy import validate_signal
-from trade_manager import TradeManager
+from config.settings import TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, runtime
+from trading.trade_manager import TradeManager
 
 logger = logging.getLogger("momathi.telegram")
 
@@ -36,7 +35,7 @@ def auth(func):
         else:
             return await func(*args, **kwargs)
         chat_id = str(update.effective_chat.id)
-        allowed = config.TELEGRAM_CHAT_ID
+        allowed = TELEGRAM_CHAT_ID
         if allowed and chat_id != allowed:
             await update.message.reply_text("⛔ Unauthorized.")
             return
@@ -53,7 +52,7 @@ class MomathiTelegramBot:
 
     def build(self) -> Application:
         """Build the Telegram application with all handlers."""
-        self.app = Application.builder().token(config.TELEGRAM_BOT_TOKEN).build()
+        self.app = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
 
         handlers = [
             ("start", self.cmd_start),
@@ -116,9 +115,9 @@ class MomathiTelegramBot:
 
     async def notify(self, text: str):
         """Send a notification message to the authorized chat."""
-        if self.app and config.TELEGRAM_CHAT_ID:
+        if self.app and TELEGRAM_CHAT_ID:
             await self.app.bot.send_message(
-                chat_id=config.TELEGRAM_CHAT_ID,
+                chat_id=TELEGRAM_CHAT_ID,
                 text=text,
                 parse_mode="HTML",
             )
@@ -142,7 +141,7 @@ class MomathiTelegramBot:
             "/get_risk — Show current risk\n"
             "/close_all — Close everything\n"
             "/stop_bot — Shutdown bot\n\n"
-            f"💰 Risk: <b>${config.runtime['risk_usd']}</b>"
+            f"💰 Risk: <b>${runtime['risk_usd']}</b>"
         )
         await update.message.reply_text(msg, parse_mode="HTML")
 
@@ -199,7 +198,7 @@ class MomathiTelegramBot:
         # Run validation in thread to avoid blocking
         loop = asyncio.get_running_loop()
         result = await loop.run_in_executor(
-            None, validate_signal, direction, coin, exec_tf
+            None, self.tm.validate_signal, direction, coin, exec_tf
         )
 
         if not result["valid"]:
@@ -215,7 +214,7 @@ class MomathiTelegramBot:
             f"📍 Entry: {levels['entry']}\n"
             f"🛑 SL: {levels['sl']}\n"
             f"🎯 TP: {levels['tp']}\n"
-            f"💰 Risk: ${float(config.runtime['risk_usd']):.2f}\n\n"
+            f"💰 Risk: ${float(runtime['risk_usd']):.2f}\n\n"
             f"⏳ Placing orders..."
         )
 
@@ -319,7 +318,7 @@ class MomathiTelegramBot:
             amount = float(context.args[0])
             if amount <= 0:
                 raise ValueError
-            config.runtime["risk_usd"] = amount
+            runtime["risk_usd"] = amount
             await update.message.reply_text(f"✅ Risk set to <b>${amount:.2f}</b> per trade.", parse_mode="HTML")
         except ValueError:
             await update.message.reply_text("⚠️ Please provide a valid positive number.")
@@ -327,7 +326,7 @@ class MomathiTelegramBot:
     @auth
     async def cmd_get_risk(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(
-            f"💰 Current risk: <b>${config.runtime['risk_usd']:.2f}</b> per trade.",
+            f"💰 Current risk: <b>${runtime['risk_usd']:.2f}</b> per trade.",
             parse_mode="HTML",
         )
 
@@ -349,19 +348,18 @@ class MomathiTelegramBot:
     @auth
     async def cmd_stop_bot(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("🛑 Shutting down Momathi bot... Goodbye! 🍅")
-        config.runtime["running"] = False
+        runtime["running"] = False
         # Stop the application gracefully
         asyncio.get_event_loop().call_later(1, lambda: os.kill(os.getpid(), signal.SIGINT))
 
     @auth
     async def cmd_scan(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Scan 1H EMA regime for all tokens in watchlist."""
-        from strategy import scan_1h_regime
-        
         msg = await update.message.reply_text("🔍 Scanning 1H EMA regime...")
         
         try:
-            result = scan_1h_regime()
+            loop = asyncio.get_running_loop()
+            result = await loop.run_in_executor(None, self.tm.scan_regime)
             
             # Build message
             lines = [
@@ -412,3 +410,31 @@ class MomathiTelegramBot:
             
         except Exception as e:
             await msg.edit_text(f"❌ Scan failed: {e}", parse_mode="HTML")
+
+    async def send_regime_alert(self, token: str, token_state: dict,
+                                alert_type: str) -> None:
+        """Send a regime change notification to the user."""
+        if alert_type == "ENTERED_CLEAN":
+            current = token_state["current_state"]  # CLEAN_LONG or CLEAN_SHORT
+            emoji = "🟢" if current == "CLEAN_LONG" else "🔴"
+            direction = "LONG" if current == "CLEAN_LONG" else "SHORT"
+            msg = (
+                f"{emoji} REGIME CHANGE — {token}\n\n"
+                f"State: {token_state['previous_state']} → {current}\n"
+                f"Confirmed: {token_state['consecutive_count']} consecutive "
+                f"15m checks\n\n"
+                f"✅ Eligible for 5m/15m {direction.lower()} entries"
+            )
+        elif alert_type == "LEFT_CLEAN":
+            msg = (
+                f"⚪ REGIME LOST — {token}\n\n"
+                f"State: {token_state['previous_state']} → "
+                f"{token_state['current_state']}\n"
+                f"1H EMAs no longer aligned\n\n"
+                f"⚠️ Review open positions; new entries on hold"
+            )
+        else:
+            logger.warning(f"send_regime_alert: unknown alert_type={alert_type}")
+            return
+
+        await self.notify(msg)

@@ -7,9 +7,10 @@ import logging
 import os
 from datetime import datetime
 
-import config
-from paradex_client import ParadexClient
-from strategy import validate_signal, get_ema30, get_mark_price
+from config.settings import runtime
+from exchange.paradex_client import ParadexClient
+from strategy.ema_setup import validate_signal, get_ema30, get_mark_price
+from trading.state import load_trades, save_trades, TRADES_FILE
 
 logger = logging.getLogger("momathi.trade_mgr")
 
@@ -22,36 +23,7 @@ class TradeManager:
     def __init__(self, client: ParadexClient):
         self.client = client
         self.active_trades: list[dict] = []
-        self._load_trades()
-
-    # ── Persistence ──────────────────────────────────────────────
-
-    def _save_trades(self):
-        """Persist active_trades to disk so the bot survives restarts."""
-        try:
-            with open(TRADES_FILE, "w") as f:
-                json.dump(self.active_trades, f, indent=2, default=str)
-            logger.debug("Saved %d active trade(s) to %s", len(self.active_trades), TRADES_FILE)
-        except Exception as e:
-            logger.error("Failed to save trades: %s", e)
-
-    def _load_trades(self):
-        """Load active_trades from disk on startup (if the file exists)."""
-        if not os.path.exists(TRADES_FILE):
-            return
-        try:
-            with open(TRADES_FILE) as f:
-                data = json.load(f)
-            if isinstance(data, list) and data:
-                self.active_trades = data
-                logger.info(
-                    "Restored %d active trade(s) from %s",
-                    len(self.active_trades), TRADES_FILE,
-                )
-            else:
-                logger.info("No active trades found in %s", TRADES_FILE)
-        except Exception as e:
-            logger.error("Failed to load trades from disk: %s", e)
+        self.active_trades = load_trades()
 
     # ── Position validation ────────────────────────────────────
 
@@ -70,7 +42,7 @@ class TradeManager:
         direction = trade["direction"]
         if trade in self.active_trades:
             self.active_trades.remove(trade)
-            self._save_trades()
+            save_trades(self.active_trades)
             logger.info(
                 "🗑️ Trade %s %s removed — position no longer exists (SL/TP hit on exchange)",
                 direction, coin,
@@ -83,7 +55,7 @@ class TradeManager:
         Calculate position size based on fixed USD risk.
         size = risk_usd / |entry - sl|
         """
-        risk = risk_usd or config.runtime["risk_usd"]
+        risk = risk_usd or runtime["risk_usd"]
         risk_per_unit = abs(entry - sl)
         if risk_per_unit == 0:
             return 0.0
@@ -102,7 +74,7 @@ class TradeManager:
         entry = levels["entry"]
         sl = levels["sl"]
         tp = levels["tp"]
-        risk_usd = config.runtime["risk_usd"]
+        risk_usd = runtime["risk_usd"]
 
         size = self.calculate_size(entry, sl, risk_usd)
         is_buy = direction.upper() == "LONG"
@@ -154,7 +126,7 @@ class TradeManager:
                 # Keep trade tracked so we can retry in check_fills loop
 
         self.active_trades.append(trade)
-        self._save_trades()
+        save_trades(self.active_trades)
         return trade
 
     def _place_tpsl(self, trade: dict):
@@ -298,7 +270,7 @@ class TradeManager:
                     needs_save = True
 
         if needs_save:
-            self._save_trades()
+            save_trades(self.active_trades)
 
         return filled_trades
 
@@ -346,7 +318,7 @@ class TradeManager:
                         self._place_tpsl(trade)
                     except Exception as e:
                         logger.error("CRITICAL: update_pending_orders failed to place TP/SL for %s %s: %s", direction, coin, e)
-                    self._save_trades()
+                    save_trades(self.active_trades)
                     continue
                 else:
                     # Order is gone AND no position — cancelled externally (or OID never set).
@@ -356,7 +328,7 @@ class TradeManager:
                         direction, coin, entry_oid,
                     )
                     self.active_trades.remove(trade)
-                    self._save_trades()
+                    save_trades(self.active_trades)
                     continue
 
             # Re-fetch EMAs using the trade's execution timeframe
@@ -399,7 +371,7 @@ class TradeManager:
             # Recalculate position size for the NEW levels to maintain risk_usd.
             # Without this, a widening EMA gap makes the old size risk MORE than
             # $10, and a narrowing gap risks less — breaking the fixed-risk model.
-            new_size = self.calculate_size(new_entry, new_sl, config.runtime["risk_usd"])
+            new_size = self.calculate_size(new_entry, new_sl, runtime["risk_usd"])
             old_size = float(trade["size"])
 
             if abs(new_size - old_size) / old_size > 0.01:
@@ -433,7 +405,7 @@ class TradeManager:
                     direction, coin,
                 )
                 self.active_trades.remove(trade)
-                self._save_trades()
+                save_trades(self.active_trades)
                 continue
 
             # Update trade record
@@ -444,7 +416,7 @@ class TradeManager:
             trade["entry_oid"] = new_entry_oid
             trade["last_updated"] = datetime.now().isoformat()
 
-            self._save_trades()
+            save_trades(self.active_trades)
 
             updates.append({
                 "coin": coin,
@@ -481,7 +453,7 @@ class TradeManager:
         """Close all positions and cancel all orders."""
         results = self.client.close_all_positions()
         self.active_trades.clear()
-        self._save_trades()
+        save_trades(self.active_trades)
         return {
             "closed": len(results),
             "results": results,
@@ -496,3 +468,16 @@ class TradeManager:
             "open_orders": self.client.get_open_orders(),
             "tracked_trades": len(self.active_trades),
         }
+
+    # ── Signal validation ────────────────────────────────────────
+
+    def validate_signal(self, direction: str, coin: str = None, exec_tf: str = "5") -> dict:
+        """Validate trade signal using strategy engine."""
+        return validate_signal(direction, coin, exec_tf, paradex_client=self.client)
+
+    # ── Regime scan ──────────────────────────────────────────────
+
+    def scan_regime(self) -> dict:
+        """Scan 1H EMA regime for watchlist tokens."""
+        from strategy.filters import scan_1h_regime
+        return scan_1h_regime(paradex_client=self.client)

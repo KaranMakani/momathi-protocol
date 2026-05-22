@@ -10,7 +10,7 @@ from paradex_py import Paradex
 from paradex_py.environment import Environment
 from paradex_py.common.order import Order, OrderType, OrderSide
 
-import config
+from config.settings import PARADEX_ENV, PARADEX_L1_ADDRESS, PARADEX_PRIVATE_KEY
 
 logger = logging.getLogger("momathi.paradex_client")
 
@@ -19,14 +19,14 @@ class ParadexClient:
     """Manages all interactions with the Paradex DEX."""
 
     def __init__(self):
-        env = "testnet" if config.PARADEX_ENV == "TESTNET" else "prod"
+        env = "testnet" if PARADEX_ENV == "TESTNET" else "prod"
         self.client = Paradex(
-            env="testnet" if config.PARADEX_ENV == "TESTNET" else "prod",
-            l1_address=config.PARADEX_L1_ADDRESS,
-            l2_private_key=config.PARADEX_PRIVATE_KEY,
+            env="testnet" if PARADEX_ENV == "TESTNET" else "prod",
+            l1_address=PARADEX_L1_ADDRESS,
+            l2_private_key=PARADEX_PRIVATE_KEY,
             
         )
-        logger.info("ParadexClient initialized for L1 Address %s on %s", config.PARADEX_L1_ADDRESS, env)
+        logger.info("ParadexClient initialized for L1 Address %s on %s", PARADEX_L1_ADDRESS, env)
 
     # ── Helpers ──────────────────────────────────────────────────
 
