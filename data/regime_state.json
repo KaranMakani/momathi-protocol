@@ -1,0 +1,74 @@
+{
+  "BTC": {
+    "current_state": "TANGLED",
+    "previous_state": null,
+    "consecutive_count": 8,
+    "last_alert_state": null,
+    "last_alert_at": null,
+    "last_check_utc": "2026-05-22T11:20:39Z"
+  },
+  "ETH": {
+    "current_state": "TANGLED",
+    "previous_state": null,
+    "consecutive_count": 8,
+    "last_alert_state": null,
+    "last_alert_at": null,
+    "last_check_utc": "2026-05-22T11:20:39Z"
+  },
+  "BNB": {
+    "current_state": "TANGLED",
+    "previous_state": null,
+    "consecutive_count": 8,
+    "last_alert_state": null,
+    "last_alert_at": null,
+    "last_check_utc": "2026-05-22T11:20:39Z"
+  },
+  "HYPE": {
+    "current_state": "CLEAN_LONG",
+    "previous_state": null,
+    "consecutive_count": 8,
+    "last_alert_state": "CLEAN_LONG",
+    "last_alert_at": "2026-05-22T09:49:19Z",
+    "last_check_utc": "2026-05-22T11:20:39Z"
+  },
+  "SOL": {
+    "current_state": "TANGLED",
+    "previous_state": null,
+    "consecutive_count": 8,
+    "last_alert_state": null,
+    "last_alert_at": null,
+    "last_check_utc": "2026-05-22T11:20:39Z"
+  },
+  "ARB": {
+    "current_state": "TANGLED",
+    "previous_state": null,
+    "consecutive_count": 8,
+    "last_alert_state": null,
+    "last_alert_at": null,
+    "last_check_utc": "2026-05-22T11:20:39Z"
+  },
+  "LINK": {
+    "current_state": "CLEAN_LONG",
+    "previous_state": null,
+    "consecutive_count": 8,
+    "last_alert_state": "CLEAN_LONG",
+    "last_alert_at": "2026-05-22T09:49:19Z",
+    "last_check_utc": "2026-05-22T11:20:39Z"
+  },
+  "XRP": {
+    "current_state": "CLEAN_SHORT",
+    "previous_state": "TANGLED",
+    "consecutive_count": 1,
+    "last_alert_state": null,
+    "last_alert_at": null,
+    "last_check_utc": "2026-05-22T11:20:39Z"
+  },
+  "ZEC": {
+    "current_state": "TANGLED",
+    "previous_state": null,
+    "consecutive_count": 8,
+    "last_alert_state": null,
+    "last_alert_at": null,
+    "last_check_utc": "2026-05-22T11:20:39Z"
+  }
+}

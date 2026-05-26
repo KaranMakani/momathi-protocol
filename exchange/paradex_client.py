@@ -175,7 +175,12 @@ class ParadexClient:
             return {"status": "error", "msg": f"Size too small: {size} → {sz}"}
 
         side = OrderSide.Buy if is_buy else OrderSide.Sell
-        o_type = OrderType.TakeProfitMarket if tpsl.lower() == "tp" else OrderType.StopLossMarket
+        
+        # Use correct Paradex SDK OrderType enums
+        if tpsl.lower() == "tp":
+            o_type = OrderType.TakeProfitMarket
+        else:
+            o_type = OrderType.StopLossMarket
         
         logger.info("TRIGGER %s %s %s | size=%s trigger=%s reduce_only=%s", tpsl.upper(), side.name, symbol, sz, px, reduce_only)
         

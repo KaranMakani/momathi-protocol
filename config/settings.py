@@ -40,7 +40,7 @@ SCAN_WATCHLIST = [
 #     "NEAR", "TRX", "APT", "AVAX", "DOGE", "OP", "TON"
 # ]
 SCAN_SPREAD_THRESHOLD = 0.3  # tuned 2026-05-22 — was 0.4, lowered after seeing only 2/9 tokens clean (HYPE, LINK). 0.3 should also catch SOL-like mid-spread cases. Tune up if too many chop signals.
-SCAN_SLOPE_LOOKBACK = 5      # candles ago for slope calculation
+SCAN_SLOPE_LOOKBACK = 3      # candles ago for slope calculation (3 hours on 1H)
 SCAN_SLOPE_THRESHOLD = 0.05  # % change to consider "up" or "down"
 
 # ── Regime Watcher Configuration ─────────────────────────────────
