@@ -36,6 +36,10 @@ ORDER_UPDATE_INTERVAL = 60  # check every 1 minute
 async def fill_check_loop(trade_mgr: TradeManager, tg_bot: MomathiTelegramBot):
     """Background loop: detect filled entries every 60s."""
     logger.info("Fill check loop started (60s interval)")
+    
+    # Thread-safe lock to prevent race conditions in fill detection
+    import threading
+    fill_lock = threading.Lock()
 
     while runtime["running"]:
         await asyncio.sleep(60)
@@ -44,6 +48,11 @@ async def fill_check_loop(trade_mgr: TradeManager, tg_bot: MomathiTelegramBot):
             break
 
         if not trade_mgr.active_trades:
+            continue
+
+        # Acquire lock to prevent concurrent fill detection
+        if not fill_lock.acquire(blocking=False):
+            logger.debug("Fill check skipped — lock already held")
             continue
 
         try:
@@ -61,6 +70,14 @@ async def fill_check_loop(trade_mgr: TradeManager, tg_bot: MomathiTelegramBot):
 
         except Exception as e:
             logger.error("Fill check error: %s", e, exc_info=True)
+            # Notify user of critical failure
+            await tg_bot.notify(
+                f"⚠️ <b>CRITICAL: Fill Check Failed</b>\n\n"
+                f"Error: <code>{str(e)}</code>\n\n"
+                f"Positions may be unprotected. Please check /status immediately."
+            )
+        finally:
+            fill_lock.release()
 
 
 async def order_update_loop(trade_mgr: TradeManager, tg_bot: MomathiTelegramBot):
@@ -118,6 +135,12 @@ async def order_update_loop(trade_mgr: TradeManager, tg_bot: MomathiTelegramBot)
 
         except Exception as e:
             logger.error("Order update error: %s", e, exc_info=True)
+            # Notify user of critical failure
+            await tg_bot.notify(
+                f"⚠️ <b>CRITICAL: Order Update Failed</b>\n\n"
+                f"Error: <code>{str(e)}</code>\n\n"
+                f"Pending orders may be stale. Please check /status."
+            )
 
 
 def _derive_state_from_scan(scan_result: dict, token: str) -> str:
@@ -199,8 +222,14 @@ async def regime_watcher_loop(trade_mgr: TradeManager, telegram_bot: MomathiTele
 
             save_regime_state(state)
 
-        except Exception:
+        except Exception as e:
             logger.exception("regime_watcher_loop error (continuing)")
+            # Notify user of regime watcher failure
+            await telegram_bot.notify(
+                f"⚠️ <b>Regime Watcher Error</b>\n\n"
+                f"Error: <code>{str(e)}</code>\n\n"
+                f"Regime monitoring temporarily paused."
+            )
 
         # Respect bot shutdown
         for _ in range(REGIME_WATCHER_INTERVAL_SECONDS):
@@ -218,6 +247,56 @@ async def post_init(app):
         await tg_bot.set_commands()
 
     if tg_bot and trade_mgr:
+        # ═══════════════════════════════════════════════════════════
+        # STARTUP RECONCILIATION: Sync local state with Paradex
+        # ═══════════════════════════════════════════════════════════
+        logger.info("Starting reconciliation with Paradex...")
+        try:
+            loop = asyncio.get_running_loop()
+            reconciliation_result = await loop.run_in_executor(
+                None, trade_mgr.reconcile_with_exchange
+            )
+            
+            if reconciliation_result["changes_made"]:
+                logger.info(
+                    "Reconciliation complete: %d trades removed, %d orphaned positions found",
+                    reconciliation_result["trades_removed"],
+                    reconciliation_result["orphaned_positions"],
+                )
+                
+                # Notify user of reconciliation results
+                msg = (
+                    f"🔄 <b>Startup Reconciliation Complete</b>\n\n"
+                    f"✅ Trades loaded from disk: <b>{len(trade_mgr.active_trades)}</b>\n"
+                    f"🗑️ Stale trades removed: <b>{reconciliation_result['trades_removed']}</b>\n"
+                )
+                if reconciliation_result["orphaned_positions"] > 0:
+                    msg += f"⚠️ Orphaned positions found: <b>{reconciliation_result['orphaned_positions']}</b>\n\n"
+                    msg += "Use /close_all to close any unexpected positions."
+                else:
+                    msg += "✅ No orphaned positions detected."
+                
+                await app.bot.send_message(
+                    chat_id=TELEGRAM_CHAT_ID,
+                    text=msg,
+                    parse_mode="HTML",
+                )
+            else:
+                logger.info("Reconciliation complete: state already synchronized")
+                
+        except Exception as e:
+            logger.error("Reconciliation failed: %s", e, exc_info=True)
+            await app.bot.send_message(
+                chat_id=TELEGRAM_CHAT_ID,
+                text=(
+                    f"⚠️ <b>Reconciliation Warning</b>\n\n"
+                    f"Failed to sync with Paradex: <code>{str(e)}</code>\n\n"
+                    f"Please verify /status manually."
+                ),
+                parse_mode="HTML",
+            )
+        
+        # Start background loops
         asyncio.create_task(fill_check_loop(trade_mgr, tg_bot))
         asyncio.create_task(order_update_loop(trade_mgr, tg_bot))
         if REGIME_WATCHER_ENABLED:

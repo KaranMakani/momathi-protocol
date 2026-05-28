@@ -4,7 +4,9 @@ Thin wrapper around the paradex-py SDK for order management.
 """
 import logging
 import math
+import time
 from decimal import Decimal
+from functools import wraps
 
 from paradex_py import Paradex
 from paradex_py.environment import Environment
@@ -13,6 +15,46 @@ from paradex_py.common.order import Order, OrderType, OrderSide
 from config.settings import PARADEX_ENV, PARADEX_L1_ADDRESS, PARADEX_PRIVATE_KEY
 
 logger = logging.getLogger("momathi.paradex_client")
+
+
+def retry_on_rate_limit(max_retries: int = 3, backoff_factor: float = 1.0):
+    """
+    Decorator: Retry API calls on rate limit (HTTP 429) with exponential backoff.
+    
+    Args:
+        max_retries: Maximum number of retry attempts (default: 3)
+        backoff_factor: Base delay multiplier in seconds (default: 1.0)
+    """
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            last_exception = None
+            for attempt in range(max_retries + 1):
+                try:
+                    return func(*args, **kwargs)
+                except Exception as e:
+                    last_exception = e
+                    error_msg = str(e).lower()
+                    # Check for rate limit indicators
+                    if "429" in error_msg or "rate limit" in error_msg or "too many requests" in error_msg:
+                        if attempt < max_retries:
+                            delay = backoff_factor * (2 ** attempt)
+                            logger.warning(
+                                "Rate limit hit on %s, retry %d/%d in %.1fs",
+                                func.__name__, attempt + 1, max_retries, delay
+                            )
+                            time.sleep(delay)
+                        else:
+                            logger.error(
+                                "Rate limit exceeded on %s after %d retries",
+                                func.__name__, max_retries
+                            )
+                    else:
+                        # Not a rate limit error, re-raise immediately
+                        raise
+            raise last_exception
+        return wrapper
+    return decorator
 
 
 class ParadexClient:
@@ -117,6 +159,7 @@ class ParadexClient:
 
     # ── Orders ───────────────────────────────────────────────────
 
+    @retry_on_rate_limit(max_retries=3, backoff_factor=2.0)
     def place_limit_order(self, coin: str, is_buy: bool, size: float, price: float) -> dict:
         """Place a GTC limit order. Returns normalized response."""
         symbol = self._coin_to_symbol(coin)
@@ -159,6 +202,7 @@ class ParadexClient:
             logger.error("Failed to place limit order: %s", e)
             return {"status": "error", "msg": str(e)}
 
+    @retry_on_rate_limit(max_retries=3, backoff_factor=2.0)
     def place_trigger_order(
         self, coin: str, is_buy: bool, size: float, trigger_px: float, tpsl: str, reduce_only: bool = True
     ) -> dict:
@@ -176,11 +220,19 @@ class ParadexClient:
 
         side = OrderSide.Buy if is_buy else OrderSide.Sell
         
-        # Use correct Paradex SDK OrderType enums
-        if tpsl.lower() == "tp":
-            o_type = OrderType.TakeProfitMarket
-        else:
-            o_type = OrderType.StopLossMarket
+        # Use correct Paradex SDK OrderType enums with fallback
+        try:
+            if tpsl.lower() == "tp":
+                o_type = OrderType.TakeProfitMarket
+            else:
+                o_type = OrderType.StopLossMarket
+        except AttributeError:
+            # Fallback for SDK version mismatch: use string-based order types
+            logger.warning("OrderType enum not found, using string fallback for %s", tpsl)
+            if tpsl.lower() == "tp":
+                o_type = "take_profit_market"
+            else:
+                o_type = "stop_loss_market"
         
         logger.info("TRIGGER %s %s %s | size=%s trigger=%s reduce_only=%s", tpsl.upper(), side.name, symbol, sz, px, reduce_only)
         
@@ -290,6 +342,7 @@ class ParadexClient:
 
 
 
+    @retry_on_rate_limit(max_retries=2, backoff_factor=1.0)
     def get_positions(self) -> list:
         """Return list of open positions with normalized details."""
         try:
@@ -314,6 +367,7 @@ class ParadexClient:
             logger.error("Failed to fetch positions: %s", e)
             return []
 
+    @retry_on_rate_limit(max_retries=2, backoff_factor=1.0)
     def get_balance(self) -> dict:
         """Return account equity and available margin."""
         try:
@@ -336,6 +390,7 @@ class ParadexClient:
             logger.error("Failed to fetch balance: %s", e)
             return {"account_value": 0, "total_margin_used": 0, "withdrawable": 0}
 
+    @retry_on_rate_limit(max_retries=2, backoff_factor=1.0)
     def get_open_orders(self) -> list:
         """Return all currently open/resting orders."""
         try:

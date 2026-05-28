@@ -8,7 +8,9 @@ import os
 
 logger = logging.getLogger("momathi.trading.state")
 
-TRADES_FILE = "active_trades.json"
+# Consolidated path: always use data/ folder
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+TRADES_FILE = os.path.join(BASE_DIR, "data", "active_trades.json")
 
 
 def load_trades() -> list:

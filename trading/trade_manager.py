@@ -14,8 +14,6 @@ from trading.state import load_trades, save_trades, TRADES_FILE
 
 logger = logging.getLogger("momathi.trade_mgr")
 
-TRADES_FILE = "active_trades.json"
-
 
 class TradeManager:
     """Manages trade lifecycle: sizing, entry, TP/SL, and position tracking."""
@@ -481,3 +479,103 @@ class TradeManager:
         """Scan 1H EMA regime for watchlist tokens."""
         from strategy.filters import scan_1h_regime
         return scan_1h_regime(paradex_client=self.client)
+
+    # ── Startup reconciliation ───────────────────────────────────
+
+    def reconcile_with_exchange(self) -> dict:
+        """
+        Reconcile local active_trades state with actual Paradex positions/orders.
+        
+        Removes trades from local state that:
+        1. Have been filled but position no longer exists (SL/TP already hit)
+        2. Have orders that were cancelled externally
+        3. Have entry_oid=None (untrackable)
+        
+        Returns dict with reconciliation statistics.
+        """
+        logger.info("Starting reconciliation with Paradex...")
+        
+        if not self.active_trades:
+            logger.info("No active trades to reconcile")
+            return {
+                "changes_made": False,
+                "trades_removed": 0,
+                "orphaned_positions": 0,
+            }
+        
+        # Fetch current Paradex state
+        open_orders = self.client.get_open_orders()
+        open_positions = self.client.get_positions()
+        
+        open_order_oids = {str(o["oid"]) for o in open_orders}
+        open_position_coins = {p["coin"] for p in open_positions}
+        
+        trades_to_remove = []
+        
+        for trade in self.active_trades:
+            entry_oid = trade.get("entry_oid")
+            coin = trade["coin"]
+            filled = trade.get("filled", False)
+            
+            # Case 1: Trade marked as filled, but position no longer exists
+            if filled and coin not in open_position_coins:
+                logger.info(
+                    "Reconciliation: %s %s marked as filled but position closed — removing",
+                    trade["direction"], coin,
+                )
+                trades_to_remove.append(trade)
+                continue
+            
+            # Case 2: Trade NOT filled, but entry_oid not in open orders (cancelled externally)
+            if not filled and entry_oid and str(entry_oid) not in open_order_oids:
+                # Check if position exists (order may have filled but fill detection missed it)
+                if coin not in open_position_coins:
+                    logger.info(
+                        "Reconciliation: %s %s order %s not found and no position — removed externally",
+                        trade["direction"], coin, entry_oid,
+                    )
+                    trades_to_remove.append(trade)
+                    continue
+                else:
+                    # Position exists but trade not marked as filled — fix it
+                    logger.warning(
+                        "Reconciliation: %s %s position exists but trade not marked as filled — fixing",
+                        trade["direction"], coin,
+                    )
+                    trade["filled"] = True
+                    # Place TP/SL if not already done
+                    if not trade.get("sl_oid") or not trade.get("tp_oid"):
+                        try:
+                            self._place_tpsl(trade)
+                            logger.info("Reconciliation: TP/SL placed for orphaned position %s", coin)
+                        except Exception as e:
+                            logger.error("Reconciliation: Failed to place TP/SL for %s: %s", coin, e)
+        
+        # Remove stale trades
+        for trade in trades_to_remove:
+            self.active_trades.remove(trade)
+        
+        # Check for orphaned positions (positions not in active_trades)
+        tracked_coins = {t["coin"] for t in self.active_trades}
+        orphaned_positions = open_position_coins - tracked_coins
+        
+        if orphaned_positions:
+            logger.warning(
+                "Reconciliation: Found %d orphaned position(s): %s",
+                len(orphaned_positions), ", ".join(orphaned_positions),
+            )
+        
+        # Save reconciled state
+        if trades_to_remove:
+            save_trades(self.active_trades)
+            logger.info(
+                "Reconciliation complete: removed %d stale trade(s), %d active trade(s) remaining",
+                len(trades_to_remove), len(self.active_trades),
+            )
+        
+        return {
+            "changes_made": len(trades_to_remove) > 0,
+            "trades_removed": len(trades_to_remove),
+            "orphaned_positions": len(orphaned_positions),
+            "orphaned_coins": list(orphaned_positions),
+        }
