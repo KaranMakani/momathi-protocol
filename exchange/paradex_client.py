@@ -220,19 +220,11 @@ class ParadexClient:
 
         side = OrderSide.Buy if is_buy else OrderSide.Sell
         
-        # Use correct Paradex SDK OrderType enums with fallback
-        try:
-            if tpsl.lower() == "tp":
-                o_type = OrderType.TakeProfitMarket
-            else:
-                o_type = OrderType.StopLossMarket
-        except AttributeError:
-            # Fallback for SDK version mismatch: use string-based order types
-            logger.warning("OrderType enum not found, using string fallback for %s", tpsl)
-            if tpsl.lower() == "tp":
-                o_type = "take_profit_market"
-            else:
-                o_type = "stop_loss_market"
+        # Use Paradex SDK OrderType enums for trigger orders
+        if tpsl.lower() == "tp":
+            o_type = OrderType.TakeProfitMarket
+        else:
+            o_type = OrderType.StopLossMarket
         
         logger.info("TRIGGER %s %s %s | size=%s trigger=%s reduce_only=%s", tpsl.upper(), side.name, symbol, sz, px, reduce_only)
         

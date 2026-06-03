@@ -1,74 +1,74 @@
 {
   "BTC": {
     "current_state": "TANGLED",
-    "previous_state": null,
-    "consecutive_count": 8,
-    "last_alert_state": null,
-    "last_alert_at": null,
-    "last_check_utc": "2026-05-22T11:20:39Z"
+    "previous_state": "CLEAN_SHORT",
+    "consecutive_count": 3,
+    "last_alert_state": "CLEAN_SHORT",
+    "last_alert_at": "2026-05-28T06:47:49Z",
+    "last_check_utc": "2026-05-29T18:09:22Z"
   },
   "ETH": {
     "current_state": "TANGLED",
-    "previous_state": null,
-    "consecutive_count": 8,
-    "last_alert_state": null,
-    "last_alert_at": null,
-    "last_check_utc": "2026-05-22T11:20:39Z"
+    "previous_state": "CLEAN_SHORT",
+    "consecutive_count": 26,
+    "last_alert_state": "CLEAN_SHORT",
+    "last_alert_at": "2026-05-28T06:47:49Z",
+    "last_check_utc": "2026-05-29T18:09:22Z"
   },
   "BNB": {
     "current_state": "TANGLED",
-    "previous_state": null,
-    "consecutive_count": 8,
-    "last_alert_state": null,
-    "last_alert_at": null,
-    "last_check_utc": "2026-05-22T11:20:39Z"
+    "previous_state": "CLEAN_SHORT",
+    "consecutive_count": 22,
+    "last_alert_state": "CLEAN_SHORT",
+    "last_alert_at": "2026-05-28T06:47:49Z",
+    "last_check_utc": "2026-05-29T18:09:22Z"
   },
   "HYPE": {
     "current_state": "CLEAN_LONG",
-    "previous_state": null,
-    "consecutive_count": 8,
+    "previous_state": "TANGLED",
+    "consecutive_count": 7,
     "last_alert_state": "CLEAN_LONG",
-    "last_alert_at": "2026-05-22T09:49:19Z",
-    "last_check_utc": "2026-05-22T11:20:39Z"
+    "last_alert_at": "2026-05-28T22:02:47Z",
+    "last_check_utc": "2026-05-29T18:09:22Z"
   },
   "SOL": {
     "current_state": "TANGLED",
-    "previous_state": null,
-    "consecutive_count": 8,
-    "last_alert_state": null,
-    "last_alert_at": null,
-    "last_check_utc": "2026-05-22T11:20:39Z"
+    "previous_state": "INSUFFICIENT_DATA",
+    "consecutive_count": 39,
+    "last_alert_state": "CLEAN_SHORT",
+    "last_alert_at": "2026-05-28T06:47:49Z",
+    "last_check_utc": "2026-05-29T18:09:22Z"
   },
   "ARB": {
-    "current_state": "TANGLED",
-    "previous_state": null,
-    "consecutive_count": 8,
+    "current_state": "INSUFFICIENT_DATA",
+    "previous_state": "TANGLED",
+    "consecutive_count": 66,
     "last_alert_state": null,
     "last_alert_at": null,
-    "last_check_utc": "2026-05-22T11:20:39Z"
+    "last_check_utc": "2026-05-29T18:09:22Z"
   },
   "LINK": {
-    "current_state": "CLEAN_LONG",
-    "previous_state": null,
-    "consecutive_count": 8,
-    "last_alert_state": "CLEAN_LONG",
-    "last_alert_at": "2026-05-22T09:49:19Z",
-    "last_check_utc": "2026-05-22T11:20:39Z"
+    "current_state": "CLEAN_SHORT",
+    "previous_state": "CLEAN_LONG",
+    "consecutive_count": 66,
+    "last_alert_state": "CLEAN_SHORT",
+    "last_alert_at": "2026-05-28T06:47:49Z",
+    "last_check_utc": "2026-05-29T18:09:22Z"
   },
   "XRP": {
-    "current_state": "CLEAN_SHORT",
-    "previous_state": "TANGLED",
-    "consecutive_count": 1,
-    "last_alert_state": null,
-    "last_alert_at": null,
-    "last_check_utc": "2026-05-22T11:20:39Z"
+    "current_state": "TANGLED",
+    "previous_state": "CLEAN_SHORT",
+    "consecutive_count": 63,
+    "last_alert_state": "CLEAN_SHORT",
+    "last_alert_at": "2026-05-28T06:32:38Z",
+    "last_check_utc": "2026-05-29T18:09:22Z"
   },
   "ZEC": {
     "current_state": "TANGLED",
-    "previous_state": null,
-    "consecutive_count": 8,
-    "last_alert_state": null,
-    "last_alert_at": null,
-    "last_check_utc": "2026-05-22T11:20:39Z"
+    "previous_state": "CLEAN_SHORT",
+    "consecutive_count": 2,
+    "last_alert_state": "CLEAN_SHORT",
+    "last_alert_at": "2026-05-28T06:47:49Z",
+    "last_check_utc": "2026-05-29T18:09:22Z"
   }
 }

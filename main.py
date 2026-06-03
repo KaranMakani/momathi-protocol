@@ -86,8 +86,12 @@ async def order_update_loop(trade_mgr: TradeManager, tg_bot: MomathiTelegramBot)
 
     while runtime["running"]:
         if trade_mgr.active_trades:
-            tfs = {int(t.get("exec_tf", 5)) for t in trade_mgr.active_trades}
-            min_tf = min(tfs) if tfs else 5
+            tfs = {int(t.get("exec_tf", 5)) for t in trade_mgr.active_trades if not t.get("filled")}
+            if not tfs:
+                # All trades are filled, no pending orders to update
+                await asyncio.sleep(30)
+                continue
+            min_tf = min(tfs)
         else:
             min_tf = 5
 
@@ -102,11 +106,18 @@ async def order_update_loop(trade_mgr: TradeManager, tg_bot: MomathiTelegramBot)
         if not trade_mgr.active_trades:
             continue
 
+        # Determine which timeframes' candles just closed.
+        # Since we woke up ~30s after a candle boundary, any TF whose candle
+        # duration evenly divides into the current timestamp just had a close.
         now2 = time.time()
         closed_tfs = set()
         for t in trade_mgr.active_trades:
+            if t.get("filled"):
+                continue
             tf_sec = int(t.get("exec_tf", 5)) * 60
-            if (now2 % tf_sec) < 10:
+            # We are 30s past boundary: check if we're within the first 60s of a new candle
+            remainder = now2 % tf_sec
+            if remainder < 60:  # generous window since we woke up aligned to boundary
                 closed_tfs.add(t.get("exec_tf", "5"))
 
         if not closed_tfs:
