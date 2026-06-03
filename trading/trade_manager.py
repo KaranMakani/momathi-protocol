@@ -163,8 +163,83 @@ class TradeManager:
         
         trade["tp_oid"] = tp_res.get("oid")
         
-        logger.info("✅ Successfully placed TP/SL for %s %s: SL_OID=%s, TP_OID=%s", 
+        logger.info("\u2705 Successfully placed TP/SL for %s %s: SL_OID=%s, TP_OID=%s", 
                     coin, trade["direction"], trade["sl_oid"], trade["tp_oid"])
+    
+    def _update_tpsl_for_filled_trade(self, trade: dict) -> dict | None:
+        """
+        Update TP/SL trigger orders for a filled trade to trail the latest EMA levels.
+            
+        1. Re-fetch EMAs to get new SL/TP levels
+        2. Cancel old SL and TP trigger orders
+        3. Place new SL and TP trigger orders at updated levels
+            
+        Returns update summary dict, or None if levels unchanged.
+        """
+        coin = trade["coin"]
+        direction = trade["direction"]
+        exec_tf = trade.get("exec_tf", "5")
+        old_sl = float(trade["sl"])
+        old_tp = float(trade["tp"])
+    
+        # Re-fetch EMAs to get latest levels
+        result = validate_signal(direction, coin, exec_tf)
+        if not result.get("valid"):
+            logger.debug("Signal no longer valid for filled %s %s, keeping existing TP/SL", direction, coin)
+            return None
+    
+        new_levels = result["levels"]
+        new_sl = float(new_levels["sl"])
+        new_tp = float(new_levels["tp"])
+    
+        # Check if SL/TP levels have actually changed
+        tick = self.client.get_tick_size(coin)
+        sl_delta = abs(new_sl - old_sl)
+        tp_delta = abs(new_tp - old_tp)
+        if sl_delta < tick and tp_delta < tick:
+            logger.debug("TP/SL unchanged for %s %s (sl_delta=%.4f tp_delta=%.4f tick=%.4f)", direction, coin, sl_delta, tp_delta, tick)
+            return None
+    
+        logger.info(
+            "Updating TP/SL for %s %s | SL: %.2f->%.2f | TP: %.2f->%.2f",
+            direction, coin, old_sl, new_sl, old_tp, new_tp,
+        )
+    
+        # Cancel old TP/SL trigger orders
+        sl_oid = trade.get("sl_oid")
+        tp_oid = trade.get("tp_oid")
+        if sl_oid:
+            self.client.cancel_order(str(sl_oid))
+            logger.info("Cancelled old SL %s for %s", sl_oid, coin)
+        if tp_oid:
+            self.client.cancel_order(str(tp_oid))
+            logger.info("Cancelled old TP %s for %s", tp_oid, coin)
+    
+        # Update trade record with new levels before placing new orders
+        trade["sl"] = new_sl
+        trade["tp"] = new_tp
+    
+        # Place new TP/SL at updated levels
+        try:
+            self._place_tpsl(trade)
+        except Exception as e:
+            logger.error("CRITICAL: Failed to place updated TP/SL for %s %s: %s", direction, coin, e)
+            # Position may be unprotected — re-raise so caller can notify user
+            raise
+    
+        save_trades(self.active_trades)
+    
+        return {
+            "coin": coin,
+            "direction": direction,
+            "old_entry": float(trade["entry"]),  # entry doesn't change for filled trades
+            "new_entry": float(trade["entry"]),
+            "old_sl": old_sl,
+            "new_sl": new_sl,
+            "new_tp": new_tp,
+            "old_size": float(trade["size"]),
+            "new_size": float(trade["size"]),
+        }
 
     # ── Fast fill check (60s loop) ─────────────────────────────
 
@@ -277,7 +352,11 @@ class TradeManager:
     def update_pending_orders(self, closed_tfs: set = None) -> list[dict]:
         """
         Re-fetch EMAs and update unfilled limit entry + SL + TP orders
-        to the latest 8 EMA / 15 EMA levels.
+        to the latest 8 EMA / 30 EMA levels.
+
+        For UNFILLED trades: cancels and re-places the entry limit order.
+        For FILLED trades: cancels and re-places the TP/SL trigger orders
+        to trail the latest EMA levels.
 
         Args:
             closed_tfs: Set of exec_tf values ("5", "15") whose candles just closed.
@@ -292,11 +371,24 @@ class TradeManager:
             if closed_tfs is not None and trade.get("exec_tf", "5") not in closed_tfs:
                 continue
 
-            if trade.get("filled"):
-                continue
-
             coin = trade["coin"]
             direction = trade["direction"]
+
+            # ═══════════════════════════════════════════════════════════
+            # FILLED TRADES: Update TP/SL trigger orders to latest EMAs
+            # ═══════════════════════════════════════════════════════════
+            if trade.get("filled"):
+                try:
+                    update_result = self._update_tpsl_for_filled_trade(trade)
+                    if update_result:
+                        updates.append(update_result)
+                except Exception as e:
+                    logger.error("Failed to update TP/SL for %s %s: %s", direction, coin, e)
+                continue
+
+            # ═══════════════════════════════════════════════════════════
+            # UNFILLED TRADES: Update entry limit order + check for fills
+            # ═══════════════════════════════════════════════════════════
 
             # Check if entry order has been filled
             open_orders = self.client.get_open_orders()
@@ -391,6 +483,10 @@ class TradeManager:
                     elif "filled" in s:
                         new_entry_oid = s["filled"]["oid"]
                         trade["filled"] = True
+                        # Entry filled immediately — place TP/SL now
+                        trade["sl"] = new_sl
+                        trade["tp"] = new_tp
+                        trade["size"] = new_size
                         self._place_tpsl(trade)
 
             # Note: We do NOT place TP/SL here while trade["filled"] is False (Paradex requirement)

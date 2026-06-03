@@ -132,16 +132,27 @@ async def order_update_loop(trade_mgr: TradeManager, tg_bot: MomathiTelegramBot)
             loop = asyncio.get_running_loop()
             updates = await loop.run_in_executor(None, trade_mgr.update_pending_orders, closed_tfs)
             for u in updates:
+                # Differentiate notification: entry update vs TP/SL trailing
+                is_tpsl_update = abs(u.get('old_entry', 0) - u.get('new_entry', 0)) < 0.01
                 size_note = ""
                 if abs(u.get('new_size', 0) - u.get('old_size', 0)) > 0.0001:
                     size_note = f"\n📦 Size: {u['old_size']:.6f} → <b>{u['new_size']:.6f}</b>"
-                msg = (
-                    f"🔄 <b>Orders Updated — {u['coin']} {u['direction']}</b>\n\n"
-                    f"📍 Entry: {u['old_entry']:.2f} → <b>{u['new_entry']:.2f}</b>\n"
-                    f"🛑 SL: {u['old_sl']:.2f} → <b>{u['new_sl']:.2f}</b>\n"
-                    f"🎯 TP: <b>{u['new_tp']:.2f}</b>"
-                    f"{size_note}"
-                )
+                
+                if is_tpsl_update:
+                    msg = (
+                        f"🔄 <b>TP/SL Updated — {u['coin']} {u['direction']}</b>\n\n"
+                        f"🛑 SL: {u['old_sl']:.2f} → <b>{u['new_sl']:.2f}</b>\n"
+                        f"🎯 TP: {u['old_tp'] if 'old_tp' in u else 'N/A'} → <b>{u['new_tp']:.2f}</b>"
+                        f"{size_note}"
+                    )
+                else:
+                    msg = (
+                        f"🔄 <b>Orders Updated — {u['coin']} {u['direction']}</b>\n\n"
+                        f"📍 Entry: {u['old_entry']:.2f} → <b>{u['new_entry']:.2f}</b>\n"
+                        f"🛑 SL: {u['old_sl']:.2f} → <b>{u['new_sl']:.2f}</b>\n"
+                        f"🎯 TP: <b>{u['new_tp']:.2f}</b>"
+                        f"{size_note}"
+                    )
                 await tg_bot.notify(msg)
 
         except Exception as e:
