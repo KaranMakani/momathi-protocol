@@ -85,20 +85,26 @@ async def order_update_loop(trade_mgr: TradeManager, tg_bot: MomathiTelegramBot)
     logger.info("Background order update loop started")
 
     while runtime["running"]:
-        if trade_mgr.active_trades:
-            tfs = {int(t.get("exec_tf", 5)) for t in trade_mgr.active_trades if not t.get("filled")}
-            if not tfs:
-                # All trades are filled, no pending orders to update
-                await asyncio.sleep(30)
-                continue
-            min_tf = min(tfs)
-        else:
-            min_tf = 5
+        # Collect all timeframes from active trades (both filled and unfilled)
+        all_tfs = {int(t.get("exec_tf", 5)) for t in trade_mgr.active_trades}
+        if not all_tfs:
+            # No trades at all — wait and check again
+            await asyncio.sleep(30)
+            continue
+        min_tf = min(all_tfs)
 
         interval = min_tf * 60
         now = time.time()
-        sleep_time = interval - (now % interval)
-        await asyncio.sleep(sleep_time + 30)  # Wait 30s after candle boundary for more stable data
+        remainder = now % interval
+        # If we're already within 60s past a boundary, don't sleep — process now.
+        # Otherwise, sleep until the next boundary + 30s.
+        if remainder < 60:
+            sleep_time = 0  # Already near a boundary, process immediately
+        else:
+            sleep_time = interval - remainder  # Sleep to next boundary
+        
+        if sleep_time > 0:
+            await asyncio.sleep(sleep_time + 30)  # Wait 30s after boundary for stable data
 
         if not runtime["running"]:
             break
@@ -112,10 +118,7 @@ async def order_update_loop(trade_mgr: TradeManager, tg_bot: MomathiTelegramBot)
         now2 = time.time()
         closed_tfs = set()
         for t in trade_mgr.active_trades:
-            if t.get("filled"):
-                continue
             tf_sec = int(t.get("exec_tf", 5)) * 60
-            # We are 30s past boundary: check if we're within the first 60s of a new candle
             remainder = now2 % tf_sec
             if remainder < 60:  # generous window since we woke up aligned to boundary
                 closed_tfs.add(t.get("exec_tf", "5"))
