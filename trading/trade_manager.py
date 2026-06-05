@@ -183,7 +183,7 @@ class TradeManager:
         old_tp = float(trade["tp"])
     
         # Re-fetch EMAs to get latest levels
-        result = validate_signal(direction, coin, exec_tf)
+        result = validate_signal(direction, coin, exec_tf, paradex_client=self.client)
         if not result.get("valid"):
             logger.debug("Signal no longer valid for filled %s %s, keeping existing TP/SL", direction, coin)
             return None
@@ -423,7 +423,7 @@ class TradeManager:
 
             # Re-fetch EMAs using the trade's execution timeframe
             exec_tf = trade.get("exec_tf", "5")
-            result = validate_signal(direction, coin, exec_tf)
+            result = validate_signal(direction, coin, exec_tf, paradex_client=self.client)
             if not result.get("valid"):
                 logger.info("Signal no longer valid for %s %s, keeping existing orders", direction, coin)
                 continue

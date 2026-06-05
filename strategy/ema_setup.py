@@ -106,12 +106,22 @@ def fetch_candles(coin: str = None, resolution: str = "5", paradex_client: Parad
         # Sort chronologically
         df = df.sort_values("timestamp").reset_index(drop=True)
         
-        # Drop the currently-forming (live) candle — only use closed candles.
-        # This ensures EMA stability: values won't change within a candle lifetime.
-        # Reverted from live-candle inclusion due to EMA drift causing order repricing issues.
+        # Drop the currently-forming (live) candle only if it hasn't closed yet.
+        # A candle is still forming if its close time is in the future.
+        # This ensures EMA stability while not skipping already-closed candles.
         if len(df) > 1:
-            df = df.iloc[:-1]
-            logger.debug("Dropped live candle, using %d closed candles", len(df))
+            res_minutes = int(resolution)
+            last_candle_close = df.iloc[-1]["timestamp"].timestamp() + (res_minutes * 60)
+            now_ts = time.time()
+            if last_candle_close > now_ts:
+                df = df.iloc[:-1]
+                logger.debug("Dropped live candle (closes at %s, now=%s), using %d closed candles",
+                             datetime.utcfromtimestamp(last_candle_close).strftime('%H:%M:%S'),
+                             datetime.utcfromtimestamp(now_ts).strftime('%H:%M:%S'),
+                             len(df))
+            else:
+                logger.debug("Last candle already closed at %s — keeping it", 
+                             datetime.utcfromtimestamp(last_candle_close).strftime('%H:%M:%S'))
         
         logger.info(f"fetch_candles: {symbol} {res_label} returned {len(df)} candles, first={df.iloc[0]['timestamp']}, last={df.iloc[-1]['timestamp']}")
         
