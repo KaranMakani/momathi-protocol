@@ -36,10 +36,6 @@ ORDER_UPDATE_INTERVAL = 60  # check every 1 minute
 async def fill_check_loop(trade_mgr: TradeManager, tg_bot: MomathiTelegramBot):
     """Background loop: detect filled entries every 60s."""
     logger.info("Fill check loop started (60s interval)")
-    
-    # Thread-safe lock to prevent race conditions in fill detection
-    import threading
-    fill_lock = threading.Lock()
 
     while runtime["running"]:
         await asyncio.sleep(60)
@@ -48,11 +44,6 @@ async def fill_check_loop(trade_mgr: TradeManager, tg_bot: MomathiTelegramBot):
             break
 
         if not trade_mgr.active_trades:
-            continue
-
-        # Acquire lock to prevent concurrent fill detection
-        if not fill_lock.acquire(blocking=False):
-            logger.debug("Fill check skipped — lock already held")
             continue
 
         try:
@@ -76,13 +67,12 @@ async def fill_check_loop(trade_mgr: TradeManager, tg_bot: MomathiTelegramBot):
                 f"Error: <code>{str(e)}</code>\n\n"
                 f"Positions may be unprotected. Please check /status immediately."
             )
-        finally:
-            fill_lock.release()
 
 
 async def order_update_loop(trade_mgr: TradeManager, tg_bot: MomathiTelegramBot):
     """Background loop: update pending orders aligned to each trade's candle close."""
     logger.info("Background order update loop started")
+    last_processed_boundary = 0  # epoch timestamp of last processed boundary
 
     while runtime["running"]:
         # Collect all timeframes from active trades (both filled and unfilled)
@@ -90,19 +80,29 @@ async def order_update_loop(trade_mgr: TradeManager, tg_bot: MomathiTelegramBot)
         if not all_tfs:
             # No trades at all — wait and check again
             await asyncio.sleep(30)
+            last_processed_boundary = 0  # reset when no trades
             continue
         min_tf = min(all_tfs)
 
         interval = min_tf * 60
         now = time.time()
         remainder = now % interval
-        # If we're already within 60s past a boundary, don't sleep — process now.
-        # Otherwise, sleep until the next boundary + 30s.
+        # Sleep until the next candle boundary + 30s for stable data.
+        # We always sleep — even if remainder is small — to avoid tight-looping
+        # on the same boundary. The 30s delay ensures the candle is fully closed
+        # on the exchange before we fetch data.
         if remainder < 60:
-            sleep_time = 0  # Already near a boundary, process immediately
+            # We're within 60s of a boundary. Check if we already processed it.
+            current_boundary = now - remainder
+            if current_boundary == last_processed_boundary:
+                # Already processed this boundary — sleep until the next one
+                sleep_time = interval  # full interval to next boundary
+            else:
+                # New boundary we haven't processed — process now (no sleep needed)
+                sleep_time = 0
         else:
             sleep_time = interval - remainder  # Sleep to next boundary
-        
+
         if sleep_time > 0:
             await asyncio.sleep(sleep_time + 30)  # Wait 30s after boundary for stable data
 
@@ -125,7 +125,12 @@ async def order_update_loop(trade_mgr: TradeManager, tg_bot: MomathiTelegramBot)
 
         if not closed_tfs:
             logger.debug("No candle boundary hit — skipping update cycle")
+            # Still record this boundary so we don't re-check it
+            last_processed_boundary = now2 - (now2 % interval)
             continue
+
+        # Record which boundary we're processing to prevent tight-loop re-processing
+        last_processed_boundary = now2 - (now2 % interval)
 
         logger.info(
             "Candle closed for TF(s): %s — running order update + trailing SL check...",

@@ -365,3 +365,66 @@ def validate_signal(direction: str, coin: str = None, exec_tf: str = "5", parade
         "ema30": round(ema30, decimals),
         "exec_tf": exec_tf,
     }
+
+
+def get_ema_levels(direction: str, coin: str = None, exec_tf: str = "5", paradex_client: ParadexClient = None) -> dict:
+    """
+    Compute entry/SL/TP levels from the execution timeframe EMAs.
+    
+    Unlike validate_signal(), this does NOT check 1H trend alignment.
+    Used for updating EXISTING positions (TP/SL trailing) and unfilled entry orders
+    where the trade is already in play and we must keep levels current regardless
+    of higher-timeframe trend changes.
+    
+    Args:
+        direction: "LONG" or "SHORT"
+        coin: Trading pair (e.g. "BTC")
+        exec_tf: Execution timeframe resolution ("5" or "15")
+        paradex_client: Authenticated ParadexClient
+    
+    Returns:
+        Dict with 'valid', 'levels', 'ema8', 'ema30', 'exec_tf'.
+        'valid' is False only on data errors, never on trend mismatch.
+    """
+    coin = coin or runtime["coin"]
+    tf_label = "5m" if exec_tf == "5" else "15m"
+
+    try:
+        df_exec = fetch_candles(coin, resolution=exec_tf, paradex_client=paradex_client)
+        if len(df_exec) < MIN_CANDLES:
+            logger.warning(
+                f"get_ema_levels: insufficient {tf_label} candles for {coin} "
+                f"(got {len(df_exec)}, need {MIN_CANDLES})"
+            )
+            return {"valid": False, "reason": f"Insufficient {tf_label} data for {coin}"}
+        df_exec = compute_emas(df_exec)
+    except Exception as e:
+        logger.error("get_ema_levels: failed to fetch %s candles: %s", tf_label, e)
+        return {"valid": False, "reason": f"Data error ({tf_label}): {e}"}
+
+    latest = df_exec.iloc[-1]
+    ema8 = latest["ema8"]
+    ema30 = latest["ema30"]
+
+    logger.info(
+        "get_ema_levels %s %s: EMA8=%.4f EMA30=%.4f",
+        coin, tf_label, ema8, ema30,
+    )
+
+    levels = calculate_levels(ema8, ema30, direction.upper())
+
+    # Sanity check: risk must be positive
+    if levels["risk_per_unit"] <= 0:
+        return {
+            "valid": False,
+            "reason": "Invalid EMA levels — risk per unit is zero or negative.",
+        }
+
+    decimals = _price_precision(ema8)
+    return {
+        "valid": True,
+        "levels": levels,
+        "ema8": round(ema8, decimals),
+        "ema30": round(ema30, decimals),
+        "exec_tf": exec_tf,
+    }

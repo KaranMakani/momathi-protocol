@@ -5,11 +5,12 @@ Orchestrates trade execution, position sizing, and PnL tracking.
 import json
 import logging
 import os
+import threading
 from datetime import datetime
 
 from config.settings import runtime
 from exchange.paradex_client import ParadexClient
-from strategy.ema_setup import validate_signal, get_ema30, get_mark_price
+from strategy.ema_setup import validate_signal, get_ema_levels, get_ema30, get_mark_price
 from trading.state import load_trades, save_trades, TRADES_FILE
 
 logger = logging.getLogger("momathi.trade_mgr")
@@ -22,6 +23,9 @@ class TradeManager:
         self.client = client
         self.active_trades: list[dict] = []
         self.active_trades = load_trades()
+        # Shared lock to prevent race conditions between fill_check_loop and
+        # order_update_loop when both detect fills or update TP/SL simultaneously.
+        self.trade_lock = threading.Lock()
 
     # ── Position validation ────────────────────────────────────
 
@@ -170,7 +174,7 @@ class TradeManager:
         """
         Update TP/SL trigger orders for a filled trade to trail the latest EMA levels.
             
-        1. Re-fetch EMAs to get new SL/TP levels
+        1. Re-fetch EMAs to get new SL/TP levels (bypassing 1H trend check — trade is already in play)
         2. Cancel old SL and TP trigger orders
         3. Place new SL and TP trigger orders at updated levels
             
@@ -182,10 +186,11 @@ class TradeManager:
         old_sl = float(trade["sl"])
         old_tp = float(trade["tp"])
     
-        # Re-fetch EMAs to get latest levels
-        result = validate_signal(direction, coin, exec_tf, paradex_client=self.client)
+        # Re-fetch EMAs to get latest levels — use get_ema_levels (no 1H trend gate)
+        # because the trade is already in play; we must trail TP/SL regardless of trend.
+        result = get_ema_levels(direction, coin, exec_tf, paradex_client=self.client)
         if not result.get("valid"):
-            logger.debug("Signal no longer valid for filled %s %s, keeping existing TP/SL", direction, coin)
+            logger.debug("EMA levels unavailable for filled %s %s, keeping existing TP/SL", direction, coin)
             return None
     
         new_levels = result["levels"]
@@ -236,6 +241,7 @@ class TradeManager:
             "new_entry": float(trade["entry"]),
             "old_sl": old_sl,
             "new_sl": new_sl,
+            "old_tp": old_tp,
             "new_tp": new_tp,
             "old_size": float(trade["size"]),
             "new_size": float(trade["size"]),
@@ -252,6 +258,16 @@ class TradeManager:
 
         Returns a list of newly-filled trade summaries.
         """
+        if not self.trade_lock.acquire(blocking=False):
+            logger.debug("check_fills skipped — trade_lock held by another operation")
+            return []
+        try:
+            return self._check_fills_inner()
+        finally:
+            self.trade_lock.release()
+
+    def _check_fills_inner(self) -> list[dict]:
+        """Internal implementation of check_fills, called under trade_lock."""
         filled_trades = []
         needs_save = False
 
@@ -364,6 +380,16 @@ class TradeManager:
 
         Returns a list of update summaries (one per updated trade).
         """
+        if not self.trade_lock.acquire(blocking=False):
+            logger.debug("update_pending_orders skipped — trade_lock held by another operation")
+            return []
+        try:
+            return self._update_pending_orders_inner(closed_tfs)
+        finally:
+            self.trade_lock.release()
+
+    def _update_pending_orders_inner(self, closed_tfs: set = None) -> list[dict]:
+        """Internal implementation of update_pending_orders, called under trade_lock."""
         updates = []
 
         for trade in self.active_trades[:]:
@@ -421,11 +447,13 @@ class TradeManager:
                     save_trades(self.active_trades)
                     continue
 
-            # Re-fetch EMAs using the trade's execution timeframe
+            # Re-fetch EMAs using the trade's execution timeframe.
+            # Use get_ema_levels (no 1H trend gate) because the trade is already
+            # placed — we must keep the entry level current regardless of trend.
             exec_tf = trade.get("exec_tf", "5")
-            result = validate_signal(direction, coin, exec_tf, paradex_client=self.client)
+            result = get_ema_levels(direction, coin, exec_tf, paradex_client=self.client)
             if not result.get("valid"):
-                logger.info("Signal no longer valid for %s %s, keeping existing orders", direction, coin)
+                logger.info("EMA levels unavailable for %s %s, keeping existing orders", direction, coin)
                 continue
 
             new_levels = result["levels"]
